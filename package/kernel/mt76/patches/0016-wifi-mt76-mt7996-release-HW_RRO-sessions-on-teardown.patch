@@ -48,7 +48,7 @@ Signed-off-by: Tao Gong <gongtao0607@gmail.com>
  			u16 idx;
  
  			e = (void *)skb->data;
-@@ -1055,10 +1056,18 @@ mt7996_mcu_wed_rro_event(struct mt7996_dev *dev, struct sk_buff *skb)
+@@ -1055,10 +1056,19 @@ mt7996_mcu_wed_rro_event(struct mt7996_dev *dev, struct sk_buff *skb)
  				break;
  
  			tid = rcu_dereference(wcid->aggr[e->tid]);
@@ -72,7 +72,7 @@ Signed-off-by: Tao Gong <gongtao0607@gmail.com>
  		break;
 --- a/mt7996/mt7996.h
 +++ b/mt7996/mt7996.h
-@@ -300,6 +300,12 @@ struct mt7996_sta_link {
+@@ -300,6 +300,13 @@ struct mt7996_sta_link {
  	unsigned long changed;
  
  	struct mt76_connac_sta_key_conf bip;
