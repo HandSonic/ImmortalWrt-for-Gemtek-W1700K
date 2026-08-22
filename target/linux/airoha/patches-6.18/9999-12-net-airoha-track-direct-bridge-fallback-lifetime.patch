@@ -1,0 +1,283 @@
+From: W1700K port <w1700k@localhost>
+Date: Sat, 23 Aug 2026 00:40:00 +0800
+Subject: [PATCH] net: airoha: track direct bridge fallback lifetime
+
+The PPE bridge-FDB fallback can bind an unbound FOE hash before the
+netfilter flowtable installs an L2 master flow.  Its direct form did not
+allocate a software subflow object, so nothing invalidated that hash when
+the selected WLAN/GDM egress device went down or was unregistered.  SSID
+or AP-interface reloads could therefore leave hardware entries pointing
+at a stale BSS/WCID path.
+
+Allocate a tracked subflow for direct binds, store the actual committed
+hardware entry (not merely the bridge template), and keep a reference on
+the resolved egress netdev.  Remove matching entries from GOING_DOWN,
+DOWN and UNREGISTER events, and clean all direct entries during PPE exit.
+
+Signed-off-by: W1700K port <w1700k@localhost>
+---
+
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -506,6 +506,7 @@
+ 	};
+ 
+ 	struct hlist_node l2_subflow_node; /* PPE L2 subflow entry */
++	struct net_device *direct_dev; /* direct fallback egress owner */
+ 	u32 hash;
+ 
+ 	struct airoha_foe_stats64 stats;
+@@ -612,6 +613,8 @@
+ 	struct hlist_head *foe_flow;
+ 	u16 *foe_check_time;
+ 
++	struct notifier_block netdev_notifier;
++
+ 	struct airoha_foe_stats *foe_stats;
+ 	dma_addr_t foe_stats_dma;
+ 
+--- a/drivers/net/ethernet/airoha/airoha_ppe.c
++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
+@@ -824,6 +824,10 @@
+ 	}
+ 	if (e->type == FLOW_TYPE_L2_SUBFLOW) {
+ 		hlist_del_init(&e->l2_subflow_node);
++		if (e->direct_dev) {
++			dev_put(e->direct_dev);
++			e->direct_dev = NULL;
++		}
+ 		kfree(e);
+ 	}
+ }
+@@ -858,11 +862,12 @@
+ static int
+ airoha_ppe_foe_commit_subflow(struct airoha_ppe *ppe,
+ 			      const struct airoha_foe_entry *bridge,
+-			      u32 hash, bool rx_wlan)
++			      u32 hash, bool rx_wlan,
++			      struct airoha_foe_entry *bound)
+ {
+ 	u32 mask = AIROHA_FOE_IB1_BIND_PACKET_TYPE | AIROHA_FOE_IB1_BIND_UDP;
+ 	struct airoha_foe_entry *hwe_p, hwe;
+-	int type;
++	int err, type;
+ 
+ 	hwe_p = airoha_ppe_foe_get_entry_locked(ppe, hash);
+ 	if (!hwe_p)
+@@ -891,7 +896,11 @@
+ 	}
+ 
+ 	hwe.bridge.data = bridge->bridge.data;
+-	return airoha_ppe_foe_commit_entry(ppe, &hwe, hash, rx_wlan);
++	err = airoha_ppe_foe_commit_entry(ppe, &hwe, hash, rx_wlan);
++	if (!err && bound)
++		memcpy(bound, &hwe, sizeof(*bound));
++
++	return err;
+ }
+ 
+ static int
+@@ -906,7 +915,8 @@
+ 	if (!f)
+ 		return -ENOMEM;
+ 
+-	err = airoha_ppe_foe_commit_subflow(ppe, &e->data, hash, rx_wlan);
++	err = airoha_ppe_foe_commit_subflow(ppe, &e->data, hash, rx_wlan,
++					      &f->data);
+ 	if (err) {
+ 		kfree(f);
+ 		return err;
+@@ -919,6 +929,38 @@
+ 	return 0;
+ }
+ 
++static int
++airoha_ppe_foe_commit_direct_subflow(struct airoha_ppe *ppe,
++				     const struct airoha_foe_entry *bridge,
++				     struct net_device *egress,
++				     u32 hash, u32 index, bool rx_wlan)
++{
++	struct airoha_flow_table_entry *f;
++	int err;
++
++	f = kzalloc(sizeof(*f), GFP_ATOMIC);
++	if (!f) {
++		dev_put(egress);
++		return -ENOMEM;
++	}
++
++	f->direct_dev = egress;
++	err = airoha_ppe_foe_commit_subflow(ppe, bridge, hash, rx_wlan,
++					      &f->data);
++	if (err) {
++		f->direct_dev = NULL;
++		dev_put(egress);
++		kfree(f);
++		return err;
++	}
++
++	f->type = FLOW_TYPE_L2_SUBFLOW;
++	f->hash = hash;
++	hlist_add_head(&f->list, &ppe->foe_flow[index]);
++
++	return 0;
++}
++
+ static bool
+ airoha_ppe_foe_prepare_bridge_subflow_dev(struct airoha_ppe *ppe,
+ 					  struct net_device *dev,
+@@ -982,7 +1024,8 @@
+ static bool
+ airoha_ppe_foe_prepare_bridge_subflow(struct airoha_ppe *ppe,
+ 				      struct sk_buff *skb,
+-				      struct airoha_foe_entry *hwe)
++				      struct airoha_foe_entry *hwe,
++				      struct net_device **direct_dev)
+ {
+ 	struct net_device_path_stack stack;
+ 	struct net_device_path_ctx ctx = {};
+@@ -993,6 +1036,8 @@
+ 	u16 vid, proto;
+ 	int err, i;
+ 
++	*direct_dev = NULL;
++
+ 	if (!is_valid_ether_addr(eh->h_source) ||
+ 	    !is_valid_ether_addr(eh->h_dest))
+ 		return false;
+@@ -1095,6 +1140,7 @@
+ 	}
+ 	dev_hold(egress);
+ 	rcu_read_unlock();
++	*direct_dev = egress;
+ 
+ 	dev_put(master);
+ 	err = airoha_ppe_foe_prepare_bridge_subflow_dev(ppe, egress, &data,
+@@ -1198,6 +1244,7 @@
+ 	struct airoha_flow_table_entry *e;
+ 	struct airoha_foe_bridge br = {};
+ 	struct airoha_foe_entry *hwe;
++	struct net_device *bridge_dev = NULL;
+ 	bool commit_done = false;
+ 	bool bridge_ready = false;
+ 	struct hlist_node *n;
+@@ -1252,12 +1299,20 @@
+ 	airoha_ppe_foe_set_bridge_addrs(&br, eth_hdr(skb));
+ 	e = rhashtable_lookup_fast(&ppe->l2_flows, &br,
+ 				   airoha_l2_flow_table_params);
+-	if (e)
++	if (e) {
+ 		airoha_ppe_foe_commit_subflow_entry(ppe, e, hash, rx_wlan);
+-	else if (bridge_ready)
+-		airoha_ppe_foe_commit_subflow(ppe, &bridge_hwe, hash, rx_wlan);
++		if (bridge_dev)
++			dev_put(bridge_dev);
++	} else if (bridge_ready && bridge_dev) {
++		airoha_ppe_foe_commit_direct_subflow(ppe, &bridge_hwe,
++							 bridge_dev, hash, index,
++							 rx_wlan);
++		bridge_dev = NULL;
++	}
+ unlock:
+ 	spin_unlock_bh(&ppe_lock);
++	if (bridge_dev)
++		dev_put(bridge_dev);
+ }
+ 
+ static int
+@@ -1909,6 +1964,69 @@
+ }
+ EXPORT_SYMBOL_GPL(airoha_ppe_put_dev);
+ 
++static void airoha_ppe_remove_direct_flows_dev(struct airoha_ppe *ppe,
++					       struct net_device *dev)
++{
++	int num_entries = airoha_ppe_get_total_num_entries(ppe);
++	struct airoha_flow_table_entry *e;
++	struct hlist_node *n;
++	int i;
++
++	spin_lock_bh(&ppe_lock);
++
++	for (i = 0; i < num_entries; i++) {
++		hlist_for_each_entry_safe(e, n, &ppe->foe_flow[i], list) {
++			if (e->type != FLOW_TYPE_L2_SUBFLOW || !e->direct_dev ||
++			    e->direct_dev != dev)
++				continue;
++
++			airoha_ppe_foe_remove_flow(ppe, e);
++		}
++	}
++
++	spin_unlock_bh(&ppe_lock);
++}
++
++static void airoha_ppe_remove_direct_flows(struct airoha_ppe *ppe)
++{
++	int num_entries = airoha_ppe_get_total_num_entries(ppe);
++	struct airoha_flow_table_entry *e;
++	struct hlist_node *n;
++	int i;
++
++	spin_lock_bh(&ppe_lock);
++
++	for (i = 0; i < num_entries; i++) {
++		hlist_for_each_entry_safe(e, n, &ppe->foe_flow[i], list) {
++			if (e->type == FLOW_TYPE_L2_SUBFLOW && e->direct_dev)
++				airoha_ppe_foe_remove_flow(ppe, e);
++		}
++	}
++
++	spin_unlock_bh(&ppe_lock);
++}
++
++static int airoha_ppe_netdev_event(struct notifier_block *nb,
++				   unsigned long event, void *ptr)
++{
++	struct airoha_ppe *ppe = container_of(nb, struct airoha_ppe,
++					      netdev_notifier);
++	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
++
++	switch (event) {
++	case NETDEV_GOING_DOWN:
++	case NETDEV_DOWN:
++	case NETDEV_UNREGISTER:
++		break;
++	default:
++		return NOTIFY_DONE;
++	}
++
++	airoha_ppe_remove_direct_flows_dev(ppe, dev);
++
++	return NOTIFY_DONE;
++}
++
+ int airoha_ppe_init(struct airoha_eth *eth)
+ {
+ 	int foe_size, err, ppe_num_stats_entries;
+@@ -1970,8 +2088,15 @@
+ 	if (err)
+ 		goto error_l2_flow_table_destroy;
+ 
++	ppe->netdev_notifier.notifier_call = airoha_ppe_netdev_event;
++	err = register_netdevice_notifier(&ppe->netdev_notifier);
++	if (err)
++		goto error_debugfs_remove;
++
+ 	return 0;
+ 
++error_debugfs_remove:
++	debugfs_remove(ppe->debugfs_dir);
+ error_l2_flow_table_destroy:
+ 	rhashtable_destroy(&ppe->l2_flows);
+ error_flow_table_destroy:
+@@ -1984,6 +2109,9 @@
+ {
+ 	struct airoha_npu *npu;
+ 
++	unregister_netdevice_notifier(&eth->ppe->netdev_notifier);
++	airoha_ppe_remove_direct_flows(eth->ppe);
++
+ 	mutex_lock(&flow_offload_mutex);
+ 
+ 	npu = rcu_replace_pointer(eth->npu, NULL,
