@@ -57,7 +57,7 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
  
  #define REG_NPU_LOCAL_SRAM		0x0
  
-@@ -174,8 +172,8 @@ static int __airoha_npu_send_msg(struct
+@@ -174,8 +172,8 @@
  	u32 val, offset = 0;
  	int ret;
  
@@ -68,7 +68,7 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
  
  	if (reply && reply_len > len)
  		return -EINVAL;
-@@ -195,6 +193,7 @@ static int __airoha_npu_send_msg(struct
+@@ -195,6 +193,7 @@
  	}
  
  	memcpy(core->buf, data, len);
@@ -76,10 +76,10 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
  
  	regmap_write(npu->regmap, REG_CR_MBQ0_CTRL(0) + offset, core->addr);
  	regmap_write(npu->regmap, REG_CR_MBQ0_CTRL(1) + offset, len);
-@@ -207,12 +206,13 @@ static int __airoha_npu_send_msg(struct
+@@ -207,12 +206,13 @@
  					      REG_CR_MBQ0_CTRL(3) + offset,
  					      val, (val & MBOX_MSG_DONE),
- 					      100, 100 * MSEC_PER_SEC);
+ 					      100, 1000 * MSEC_PER_SEC);
 -	if (!ret && FIELD_GET(MBOX_MSG_STATUS, val) != NPU_MBOX_SUCCESS)
 -		ret = -EINVAL;
 -
@@ -96,7 +96,7 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
  
  unlock:
  	spin_unlock_bh(&core->lock);
-@@ -791,6 +791,11 @@ static const struct regmap_config regmap
+@@ -791,6 +791,11 @@
  	.disable_locking	= true,
  };
  
@@ -108,7 +108,7 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
  static int airoha_npu_probe(struct platform_device *pdev)
  {
  	struct device *dev = &pdev->dev;
-@@ -876,13 +881,29 @@ static int airoha_npu_probe(struct platf
+@@ -876,13 +881,29 @@
  	if (err)
  		return err;
  
