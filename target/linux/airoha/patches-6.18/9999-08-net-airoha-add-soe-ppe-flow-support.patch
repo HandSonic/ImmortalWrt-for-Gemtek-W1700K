@@ -12,7 +12,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
 ---
 --- a/drivers/net/ethernet/airoha/airoha_ppe.c
 +++ b/drivers/net/ethernet/airoha/airoha_ppe.c
-@@ -6,15 +6,22 @@
+@@ -6,16 +6,23 @@
  
  #include <linux/ip.h>
  #include <linux/ipv6.h>
@@ -24,6 +24,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
 +#include <linux/sysfs.h>
 +#include <linux/tcp.h>
 +#include <linux/udp.h>
+ #include <net/flow_dissector.h>
  #include <net/ipv6.h>
 +#include <net/netfilter/nf_flow_table.h>
  #include <net/pkt_cls.h>
@@ -35,7 +36,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  
  /* Serialize airoha_gdm_dev flags, QDMA pointer and PPE CPU port
   * configuration.
-@@ -22,6 +29,47 @@
+@@ -23,6 +30,47 @@
  DEFINE_MUTEX(flow_offload_mutex);
  static DEFINE_SPINLOCK(ppe_lock);
  
@@ -83,7 +84,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  static const struct rhashtable_params airoha_flow_table_params = {
  	.head_offset = offsetof(struct airoha_flow_table_entry, node),
  	.key_offset = offsetof(struct airoha_flow_table_entry, cookie),
-@@ -82,6 +130,17 @@ bool airoha_ppe_is_enabled(struct airoha
+@@ -83,6 +131,17 @@
  	return airoha_fe_rr(eth, REG_PPE_GLO_CFG(index)) & PPE_GLO_CFG_EN_MASK;
  }
  
@@ -101,7 +102,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  static u32 airoha_ppe_get_timestamp(struct airoha_ppe *ppe)
  {
  	return airoha_fe_get(ppe->eth, REG_FE_FOE_TS,
-@@ -186,15 +245,14 @@ static void airoha_ppe_hw_init(struct ai
+@@ -187,15 +246,14 @@
  			      FIELD_PREP(PPE_DRAM_TB_NUM_ENTRY_MASK,
  					 dram_num_entries));
  
@@ -121,7 +122,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	}
  
  	for (i = 0; i < ARRAY_SIZE(eth->ports); i++) {
-@@ -534,6 +592,164 @@ static int airoha_ppe_foe_entry_set_ipv6
+@@ -535,6 +593,164 @@
  	return 0;
  }
  
@@ -286,7 +287,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  static u32 airoha_ppe_foe_get_entry_hash(struct airoha_ppe *ppe,
  					 struct airoha_foe_entry *hwe)
  {
-@@ -660,6 +876,9 @@ static void airoha_ppe_foe_flow_stats_up
+@@ -661,6 +877,9 @@
  		meter = &hwe->ipv4.l2.meter;
  	}
  
@@ -296,7 +297,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	pse_port = FIELD_GET(AIROHA_FOE_IB2_PSE_PORT, *ib2);
  	if (pse_port == FE_PSE_PORT_CDM4)
  		return;
-@@ -786,6 +1005,98 @@ unlock:
+@@ -787,6 +1006,98 @@
  	return err;
  }
  
@@ -395,8 +396,8 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  static void airoha_ppe_foe_remove_flow(struct airoha_ppe *ppe,
  				       struct airoha_flow_table_entry *e)
  {
-@@ -987,6 +1298,255 @@ airoha_ppe_foe_prepare_bridge_subflow(st
- 	return err;
+@@ -1140,6 +1451,255 @@
+ 	}
  }
  
 +static void airoha_ppe_soe_meta_store(struct airoha_ppe_soe_meta *meta,
@@ -651,7 +652,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  static void airoha_ppe_foe_insert_entry(struct airoha_ppe *ppe,
  					struct sk_buff *skb,
  					u32 hash, bool rx_wlan)
-@@ -1070,7 +1630,9 @@ static int airoha_ppe_foe_flow_commit_en
+@@ -1234,7 +1794,9 @@
  					    struct airoha_flow_table_entry *e)
  {
  	int type = FIELD_GET(AIROHA_FOE_IB1_BIND_PACKET_TYPE, e->data.ib1);
@@ -661,7 +662,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  
  	if (type == PPE_PKT_TYPE_BRIDGE)
  		return airoha_ppe_foe_l2_flow_commit_entry(ppe, e);
-@@ -1079,7 +1641,25 @@ static int airoha_ppe_foe_flow_commit_en
+@@ -1243,7 +1805,25 @@
  	e->type = FLOW_TYPE_L4;
  	e->hash = 0xffff;
  
@@ -687,7 +688,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	hlist_add_head(&e->list, &ppe->foe_flow[hash]);
  	spin_unlock_bh(&ppe_lock);
  
-@@ -1183,6 +1763,7 @@ static int airoha_ppe_entry_idle_time(st
+@@ -1347,6 +1927,7 @@
  static int airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
  					   struct flow_cls_offload *f)
  {
@@ -695,7 +696,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	struct flow_rule *rule = flow_cls_offload_flow_rule(f);
  	struct airoha_flow_table_entry *e;
  	struct airoha_flow_data data = {};
-@@ -1316,7 +1897,9 @@ static int airoha_ppe_flow_offload_repla
+@@ -1480,7 +2061,9 @@
  		flow_rule_match_ipv4_addrs(rule, &addrs);
  		data.v4.src_addr = addrs.key->src;
  		data.v4.dst_addr = addrs.key->dst;
@@ -706,7 +707,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	}
  
  	if (addr_type == FLOW_DISSECTOR_KEY_IPV6_ADDRS) {
-@@ -1361,6 +1944,10 @@ static int airoha_ppe_flow_offload_repla
+@@ -1525,6 +2108,10 @@
  			return err;
  	}
  
@@ -717,7 +718,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	e = kzalloc(sizeof(*e), GFP_KERNEL);
  	if (!e)
  		return -ENOMEM;
-@@ -1486,17 +2073,55 @@ static int airoha_ppe_flow_offload_cmd(s
+@@ -1650,17 +2237,55 @@
  static int airoha_ppe_flush_sram_entries(struct airoha_ppe *ppe,
  					 struct airoha_npu *npu)
  {
@@ -776,7 +777,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  static struct airoha_npu *airoha_ppe_npu_get(struct airoha_eth *eth)
  {
  	struct airoha_npu *npu = airoha_npu_get(eth->dev);
-@@ -1740,6 +2365,12 @@ int airoha_ppe_init(struct airoha_eth *e
+@@ -1904,6 +2529,12 @@
  	if (!ppe->foe_check_time)
  		return -ENOMEM;
  
@@ -789,7 +790,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	err = rhashtable_init(&eth->flow_table, &airoha_flow_table_params);
  	if (err)
  		return err;
-@@ -1752,6 +2383,8 @@ int airoha_ppe_init(struct airoha_eth *e
+@@ -1916,6 +2547,8 @@
  	if (err)
  		goto error_l2_flow_table_destroy;
  
@@ -798,7 +799,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	return 0;
  
  error_l2_flow_table_destroy:
-@@ -1766,6 +2399,8 @@ void airoha_ppe_deinit(struct airoha_eth
+@@ -1930,6 +2563,8 @@
  {
  	struct airoha_npu *npu;
  
