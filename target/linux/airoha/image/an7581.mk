@@ -108,8 +108,8 @@ define Device/gemtek_w1700k-ubi
   DEVICE_COMPAT_MESSAGE := Partition table has been changed to cooperate \
        with the vendor bootloader with regard to the BMT/BBT partition at \
        the end of flash. A reinstall including corrected chainloader is needed.
-  DEVICE_PACKAGES := airoha-en7581-mt7996-npu-firmware ethtool-full fitblk \\
-		    kmod-i2c-an7581 kmod-hwmon-nct7802 kmod-mt7996-firmware \\
+  DEVICE_PACKAGES := airoha-en7581-mt7996-npu-firmware ethtool-full fitblk \
+		    kmod-i2c-an7581 kmod-hwmon-nct7802 kmod-mt7996-firmware \
 		    kmod-phy-realtek uboot-envtools wpad-mbedtls rtl826x-firmware
   UBINIZE_OPTS := -E 5
   BLOCKSIZE := 128k
