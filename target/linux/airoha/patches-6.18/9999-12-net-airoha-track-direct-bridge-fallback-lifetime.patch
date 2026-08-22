@@ -165,9 +165,9 @@ Signed-off-by: W1700K port <w1700k@localhost>
  	u32 index, state;
  
  	bridge_ready = airoha_ppe_foe_prepare_bridge_subflow(ppe, skb,
--						     &bridge_hwe);
-+						     &bridge_hwe,
-+						     &bridge_dev);
+-							     &bridge_hwe);
++							     &bridge_hwe,
++							     &bridge_dev);
  
  	spin_lock_bh(&ppe_lock);
 @@ -1252,12 +1299,20 @@
