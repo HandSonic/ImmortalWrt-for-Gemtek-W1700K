@@ -2,9 +2,10 @@ From: W1700K port <w1700k@localhost>
 Subject: [PATCH] wifi: mt76: mt7996: release HW_RRO sessions on station removal
 
 An RX BlockAck stop may race with station teardown or never be observed for
-every TID.  The firmware-assigned session IDs persisted in 0016 must then be
-released when the station link is removed; otherwise the NPU can retain the
-same stale per-WCID RRO context that poison WCID reuse after reconnect.
+every TID.  The firmware-assigned session IDs persisted in 0016 must
+then be released when the station link is removed; otherwise the NPU can
+retain the same stale per-WCID RRO context that poisons WCID
+reuse after reconnect.
 
 Consume each ID atomically and issue the existing RRO delete command before
 the WTBL/WCID state is detached.  Normal RX BA stop has already cleared its

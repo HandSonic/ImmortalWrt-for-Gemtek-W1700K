@@ -14,7 +14,6 @@ when RX BA stops, and explicitly ask firmware to release that session.
 Continue processing remaining session-status events when one TID is
 already torn down or belongs to another link.
 
-Assisted-By: OpenCode
 Signed-off-by: Tao Gong <gongtao0607@gmail.com>
 ---
 
@@ -58,7 +57,8 @@ Signed-off-by: Tao Gong <gongtao0607@gmail.com>
 +			if (!tid) {
 +				/* BA session is not tracked on the primary
 +				 * link (secondary link or already torn down);
-+				 * keep processing the remaining events. */
++				 * keep processing the remaining events.
++				 */
 +				skb_pull(skb, sizeof(*e));
 +				continue;
 +			}
@@ -80,7 +80,8 @@ Signed-off-by: Tao Gong <gongtao0607@gmail.com>
 +	 * UNI_WED_RRO_BA_SESSION_STATUS event; consumed at BA teardown to
 +	 * release the firmware-side session.  Written from the WED RRO event
 +	 * handler, read/cleared under dev->mt76.mutex in the BA teardown
-+	 * path. */
++	 * path.
++	 */
 +	u16 rro_id[IEEE80211_NUM_TIDS];
  
  	struct {
