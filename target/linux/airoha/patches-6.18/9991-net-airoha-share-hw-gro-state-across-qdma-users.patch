@@ -23,8 +23,8 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
 
 --- a/drivers/net/ethernet/airoha/airoha_eth.c
 +++ b/drivers/net/ethernet/airoha/airoha_eth.c
-@@ -2045,13 +2045,20 @@ static void airoha_update_hw_stats(struc
- 	spin_unlock(&port->lock);
+@@ -2115,13 +2115,20 @@
+ 					 VLAN_ETH_HLEN + netdev->mtu));
  }
  
 -static void airoha_update_netdev_features(struct airoha_gdm_dev *dev)
@@ -46,7 +46,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  		int j;
  
  		if (!port)
-@@ -2069,12 +2076,15 @@ static void airoha_update_netdev_feature
+@@ -2139,12 +2146,15 @@
  				continue;
  
  			netdev = netdev_from_priv(iter_dev);
@@ -62,8 +62,8 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
 +	qdma->syncing_gro_features = false;
  }
  
- static void airoha_qdma_start(struct airoha_qdma *qdma)
-@@ -2138,12 +2148,6 @@ static int airoha_dev_open(struct net_de
+ static int airoha_dev_open(struct net_device *netdev)
+@@ -2163,12 +2173,6 @@
  	qdma = airoha_qdma_deref(dev);
  	qdma_id = qdma - &eth->qdma[0];
  
@@ -76,10 +76,11 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	err = phylink_of_phy_connect(dev->phylink, netdev->dev.of_node, 0);
  	if (err) {
  		netdev_err(netdev, "could not attach PHY: %d\n", err);
-@@ -2176,11 +2180,12 @@ static int airoha_dev_open(struct net_de
+@@ -2199,12 +2203,12 @@
  	airoha_set_gdm_port_fwd_cfg(eth, REG_GDM_FWD_CFG(port->id),
  				    pse_port);
  
+- 	qdma->users++;
 -	if (netdev->features & NETIF_F_GRO_HW)
 +	qdma = airoha_qdma_deref(dev);
 +	qdma_id = qdma - &eth->qdma[0];
@@ -92,15 +93,15 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	return 0;
  }
  
-@@ -2204,7 +2209,6 @@ static int airoha_dev_stop(struct net_de
- 					    REG_GDM_FWD_CFG(port->id),
+@@ -2226,7 +2230,6 @@
  					    FE_PSE_PORT_DROP);
- 	airoha_qdma_stop(qdma);
+ 
+ 	qdma->users--;
 -	airoha_update_netdev_features(dev);
  
  	phylink_stop(dev->phylink);
  	phylink_disconnect_phy(dev->phylink);
-@@ -2528,19 +2532,6 @@ int airoha_get_fe_port(struct airoha_gdm
+@@ -2538,19 +2541,6 @@
  					   : port->id;
  }
  
@@ -120,7 +121,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  static int airoha_dev_set_features(struct net_device *netdev,
  				   netdev_features_t features)
  {
-@@ -2549,7 +2540,7 @@ static int airoha_dev_set_features(struc
+@@ -2559,7 +2549,7 @@
  	struct airoha_qdma *qdma = airoha_qdma_deref(dev);
  	int qdma_id = qdma - &dev->eth->qdma[0];
  
@@ -129,7 +130,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  		return 0;
  
  	if (features & NETIF_F_GRO_HW)
-@@ -2557,6 +2548,11 @@ static int airoha_dev_set_features(struc
+@@ -2567,6 +2557,11 @@
  	else
  		airoha_fe_lro_disable(dev->eth, qdma_id);
  
@@ -141,7 +142,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	return 0;
  }
  
-@@ -3635,7 +3631,6 @@ static const struct net_device_ops airoh
+@@ -3637,7 +3632,6 @@
  	.ndo_stop		= airoha_dev_stop,
  	.ndo_change_mtu		= airoha_dev_change_mtu,
  	.ndo_select_queue	= airoha_dev_select_queue,
@@ -151,7 +152,7 @@ Signed-off-by: Jihong Min <hurryman2212@gmail.com>
  	.ndo_get_stats64        = airoha_dev_get_stats64,
 --- a/drivers/net/ethernet/airoha/airoha_eth.h
 +++ b/drivers/net/ethernet/airoha/airoha_eth.h
-@@ -550,6 +550,7 @@ struct airoha_qdma {
+@@ -546,6 +546,7 @@
  	void __iomem *regs;
  
  	int users;
