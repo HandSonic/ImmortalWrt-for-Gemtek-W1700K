@@ -21,7 +21,15 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
 ---
 --- a/drivers/net/ethernet/airoha/airoha_ppe.c
 +++ b/drivers/net/ethernet/airoha/airoha_ppe.c
-@@ -934,10 +934,13 @@
+@@ -4,6 +4,7 @@
+  * Author: Lorenzo Bianconi <lorenzo@kernel.org>
+  */
+ 
++#include <linux/if_bridge.h>
+ #include <linux/ip.h>
+ #include <linux/ipv6.h>
+ #include <linux/of_platform.h>
+@@ -934,10 +935,13 @@
  				      struct airoha_foe_entry *hwe)
  {
  	struct net_device_path_stack stack;
