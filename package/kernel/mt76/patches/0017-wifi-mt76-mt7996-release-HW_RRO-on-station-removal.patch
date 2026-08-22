@@ -12,12 +12,12 @@ ID, so this path does not duplicate releases.
 
 Signed-off-by: W1700K port <w1700k@localhost>
 ---
- mt7996/main.c | 20 ++++++++++++++++++++
- 1 file changed, 20 insertions(+)
+ mt7996/main.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
 
 --- a/mt7996/main.c
 +++ b/mt7996/main.c
-@@ -1192,10 +1192,29 @@ mt7996_mac_sta_init_link(struct mt7996_dev *dev,
+@@ -1192,8 +1192,25 @@ mt7996_mac_sta_init_link(struct mt7996_dev *dev,
  	return 0;
  }
  
