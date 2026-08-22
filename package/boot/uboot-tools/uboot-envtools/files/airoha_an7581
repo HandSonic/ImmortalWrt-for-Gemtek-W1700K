@@ -2,8 +2,8 @@
 # Copyright (C) 2025 OpenWrt.org
 #
 
-. /lib/uboot-envtools.sh
 . /lib/functions.sh
+. /lib/uboot-envtools.sh
 
 board=$(board_name)
 
@@ -38,7 +38,7 @@ ubootenv_add_ubi_http_recovery() {
 
 	# The Gemtek XR1710G / W1700K HTTP-recovery chainloader U-Boot uses
 	# CONFIG_ENV_SIZE=0x4000 for its redundant UBI environment.  Using the
-	# generic 0x1f000 layout makes fw_setenv write an environment whose CRC
+	# generic 0x1f000 size makes fw_setenv write an environment whose CRC
 	# the U-Boot rejects, so bootcmd changes never take effect.
 	ubootenv_add_uci_config "$dev" "0x0" "0x4000" "0x1f000" "1"
 	ubootenv_add_uci_config "$dev2" "0x0" "0x4000" "0x1f000" "1"

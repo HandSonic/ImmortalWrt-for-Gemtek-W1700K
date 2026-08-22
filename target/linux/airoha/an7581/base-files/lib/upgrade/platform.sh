@@ -59,6 +59,9 @@ platform_do_upgrade() {
 		nokia,xg-040g-md-ubi)
 			fit_do_upgrade "$1"
 			;;
+		gemtek,xr1710g-ubi)
+			fit_do_upgrade "$1"
+			;;
 		*)
 			nand_do_upgrade "$1"
 			;;

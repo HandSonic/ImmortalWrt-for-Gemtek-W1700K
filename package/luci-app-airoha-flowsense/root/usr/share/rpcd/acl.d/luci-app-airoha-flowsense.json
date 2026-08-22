@@ -3,7 +3,7 @@
 		"description": "Grant access to Airoha FlowSense offload & PPE monitor",
 		"read": {
 			"ubus": {
-				"luci.airoha_flowsense": [ "getOverview", "getStatus", "getPpeEntries", "getTokenInfo", "getFrameEngine", "getVlanOffload", "getFlowOffload", "getPppoeOffload", "getApModeOffload", "getTxStats", "getDeviceMode", "getWanHealth", "getJitterResult", "getWifiStats", "getBridgeStats", "getNpuBypass", "getConflictAlerts", "getEthStats", "getPingTarget" ]
+				"luci.airoha_flowsense": [ "getStatus", "getPpeEntries", "getTokenInfo", "getFrameEngine", "getVlanOffload", "getFlowOffload", "getPppoeOffload", "getTxStats", "getDeviceMode", "getWanHealth", "getJitterResult", "getWifiStats", "getBridgeStats", "getNpuBypass", "getConflictAlerts", "getEthStats" ]
 			},
 			"file": {
 				"/sys/kernel/debug/ppe/entries": [ "read" ],
@@ -15,10 +15,13 @@
 		},
 		"write": {
 			"ubus": {
-				"luci.airoha_flowsense": [ "setPingTarget" ]
+				"luci.airoha_flowsense": [ "setVlanOffload", "setFlowOffload", "setPppoeOffload" ]
 			},
-			"uci": {
-				"npu-monitor": [ "write" ]
+			"file": {
+				"/proc/sys/net/bridge/bridge-nf-filter-vlan-tagged": [ "read", "write" ],
+				"/proc/sys/net/bridge/bridge-nf-filter-pppoe-tagged": [ "read", "write" ],
+				"/etc/sysctl.d/14-vlan-offload.conf": [ "write" ],
+				"/etc/sysctl.d/15-pppoe-offload.conf": [ "write" ]
 			}
 		}
 	}

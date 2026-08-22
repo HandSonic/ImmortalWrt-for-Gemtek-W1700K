@@ -285,19 +285,19 @@
 	phy-mode = "usxgmii";
 	nvmem-cells = <&wan_mac 0>;
 	nvmem-cell-names = "mac-address";
-	openwrt,netdev-name = "wan";
 };
 &eth_pcs {
 	status = "okay";
 };
 &gdm4 {
 	status = "okay";
+	airoha,lan-port;
+
 	managed = "in-band-status";
 	phy-handle = <&phy5>;
 	phy-mode = "usxgmii";
 	nvmem-cells = <&lan_mac 4>;
 	nvmem-cell-names = "mac-address";
-	openwrt,netdev-name = "lan2";
 };
 &switch {
 	status = "okay";
