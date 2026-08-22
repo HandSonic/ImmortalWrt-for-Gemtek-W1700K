@@ -20,7 +20,7 @@ Signed-off-by: W1700K port <w1700k@localhost>
 
 --- a/drivers/net/ethernet/airoha/airoha_eth.h
 +++ b/drivers/net/ethernet/airoha/airoha_eth.h
-@@ -527,6 +527,8 @@
+@@ -502,6 +502,8 @@
  	};
  
  	struct hlist_node l2_subflow_node; /* PPE L2 subflow entry */
@@ -29,9 +29,9 @@ Signed-off-by: W1700K port <w1700k@localhost>
  	u32 hash;
  
  	struct airoha_foe_stats64 stats;
-@@ -639,6 +641,9 @@
+@@ -608,6 +610,9 @@
+ 	struct hlist_head *foe_flow;
  	u16 *foe_check_time;
- 	struct airoha_ppe_soe_meta *soe_meta;
  
 +	struct notifier_block netdev_notifier;
 +	struct notifier_block switchdev_notifier;
@@ -49,33 +49,116 @@ Signed-off-by: W1700K port <w1700k@localhost>
  
  #include "airoha_regs.h"
  #include "airoha_eth.h"
-@@ -1223,6 +1224,7 @@
- airoha_ppe_foe_commit_direct_subflow(struct airoha_ppe *ppe,
- 				     const struct airoha_foe_entry *bridge,
- 				     struct net_device *egress,
-+				     const u8 *dest_addr,
- 				     u32 hash, u32 index, bool rx_wlan)
+@@ -1114,6 +1115,10 @@
+ 	}
+ 	if (e->type == FLOW_TYPE_L2_SUBFLOW) {
+ 		hlist_del_init(&e->l2_subflow_node);
++		if (e->direct_dev) {
++			dev_put(e->direct_dev);
++			e->direct_dev = NULL;
++		}
+ 		kfree(e);
+ 	}
+ }
+@@ -1148,11 +1153,12 @@
+ static int
+ airoha_ppe_foe_commit_subflow(struct airoha_ppe *ppe,
+ 			      const struct airoha_foe_entry *bridge,
+-			      u32 hash, bool rx_wlan)
++			      u32 hash, bool rx_wlan,
++			      struct airoha_foe_entry *bound)
  {
- 	struct airoha_flow_table_entry *f;
-@@ -1235,6 +1237,7 @@
+ 	u32 mask = AIROHA_FOE_IB1_BIND_PACKET_TYPE | AIROHA_FOE_IB1_BIND_UDP;
+ 	struct airoha_foe_entry *hwe_p, hwe;
+-	int type;
++	int err, type;
+ 
+ 	hwe_p = airoha_ppe_foe_get_entry_locked(ppe, hash);
+ 	if (!hwe_p)
+@@ -1181,7 +1187,11 @@
  	}
  
- 	f->direct_dev = egress;
-+	ether_addr_copy(f->direct_addr, dest_addr);
- 	err = airoha_ppe_foe_commit_subflow(ppe, bridge, hash, rx_wlan,
- 					      &f->data);
+ 	hwe.bridge.data = bridge->bridge.data;
+-	return airoha_ppe_foe_commit_entry(ppe, &hwe, hash, rx_wlan);
++	err = airoha_ppe_foe_commit_entry(ppe, &hwe, hash, rx_wlan);
++	if (!err && bound)
++		memcpy(bound, &hwe, sizeof(*bound));
++
++	return err;
+ }
+ 
+ static int
+@@ -1196,7 +1206,8 @@
+ 	if (!f)
+ 		return -ENOMEM;
+ 
+-	err = airoha_ppe_foe_commit_subflow(ppe, &e->data, hash, rx_wlan);
++	err = airoha_ppe_foe_commit_subflow(ppe, &e->data, hash, rx_wlan,
++					      &f->data);
  	if (err) {
-@@ -1287,7 +1290,8 @@
+ 		kfree(f);
+ 		return err;
+@@ -1209,6 +1220,40 @@
+ 	return 0;
+ }
+ 
++static int
++airoha_ppe_foe_commit_direct_subflow(struct airoha_ppe *ppe,
++				     const struct airoha_foe_entry *bridge,
++				     struct net_device *egress,
++				     const u8 *dest_addr,
++				     u32 hash, u32 index, bool rx_wlan)
++{
++	struct airoha_flow_table_entry *f;
++	int err;
++
++	f = kzalloc(sizeof(*f), GFP_ATOMIC);
++	if (!f) {
++		dev_put(egress);
++		return -ENOMEM;
++	}
++
++	f->direct_dev = egress;
++	ether_addr_copy(f->direct_addr, dest_addr);
++	err = airoha_ppe_foe_commit_subflow(ppe, bridge, hash, rx_wlan,
++					      &f->data);
++	if (err) {
++		f->direct_dev = NULL;
++		dev_put(egress);
++		kfree(f);
++		return err;
++	}
++
++	f->type = FLOW_TYPE_L2_SUBFLOW;
++	f->hash = hash;
++	hlist_add_head(&f->list, &ppe->foe_flow[index]);
++
++	return 0;
++}
++
+ static bool
+ airoha_ppe_foe_prepare_bridge_subflow_dev(struct airoha_ppe *ppe,
+ 					  struct net_device *dev,
+@@ -1244,7 +1289,9 @@
+ static bool
  airoha_ppe_foe_prepare_bridge_subflow(struct airoha_ppe *ppe,
  				      struct sk_buff *skb,
- 				      struct airoha_foe_entry *hwe,
--				      struct net_device **direct_dev)
+-				      struct airoha_foe_entry *hwe)
++				      struct airoha_foe_entry *hwe,
 +				      struct net_device **direct_dev,
 +				      u8 *direct_addr)
  {
  	struct net_device_path_stack stack;
  	struct net_device_path_ctx ctx = {};
-@@ -1306,6 +1310,7 @@
+@@ -1255,12 +1302,15 @@
+ 	u16 vid, proto;
+ 	int err, i;
+ 
++	*direct_dev = NULL;
++
+ 	if (!is_valid_ether_addr(eh->h_source) ||
+ 	    !is_valid_ether_addr(eh->h_dest))
+ 		return false;
  
  	ether_addr_copy(data.eth.h_dest, eh->h_dest);
  	ether_addr_copy(data.eth.h_source, eh->h_source);
@@ -83,15 +166,24 @@ Signed-off-by: W1700K port <w1700k@localhost>
  
  	if (!skb->dev)
  		return false;
-@@ -1756,6 +1761,7 @@
+@@ -1357,6 +1407,7 @@
+ 	}
+ 	dev_hold(egress);
+ 	rcu_read_unlock();
++	*direct_dev = egress;
+ 
+ 	dev_put(master);
+ 	err = airoha_ppe_foe_prepare_bridge_subflow_dev(ppe, egress, &data,
+@@ -1709,6 +1760,8 @@
+ 	struct airoha_flow_table_entry *e;
  	struct airoha_foe_bridge br = {};
  	struct airoha_foe_entry *hwe;
- 	struct net_device *bridge_dev = NULL;
++	struct net_device *bridge_dev = NULL;
 +	u8 bridge_addr[ETH_ALEN] = {};
  	bool commit_done = false;
  	bool bridge_ready = false;
  	struct hlist_node *n;
-@@ -1811,12 +1817,20 @@
+@@ -1763,12 +1816,20 @@
  	airoha_ppe_foe_set_bridge_addrs(&br, eth_hdr(skb));
  	e = rhashtable_lookup_fast(&ppe->l2_flows, &br,
  				   airoha_l2_flow_table_params);
@@ -115,7 +207,7 @@ Signed-off-by: W1700K port <w1700k@localhost>
  }
  
  static int
-@@ -2533,6 +2547,117 @@
+@@ -2485,6 +2546,117 @@
  }
  EXPORT_SYMBOL_GPL(airoha_ppe_put_dev);
  
@@ -233,7 +325,7 @@ Signed-off-by: W1700K port <w1700k@localhost>
  int airoha_ppe_init(struct airoha_eth *eth)
  {
  	int foe_size, err, ppe_num_stats_entries;
-@@ -2598,8 +2723,22 @@
+@@ -2550,8 +2722,22 @@
  
  	WRITE_ONCE(airoha_ppe_active, ppe);
  
@@ -256,7 +348,7 @@ Signed-off-by: W1700K port <w1700k@localhost>
  error_l2_flow_table_destroy:
  	rhashtable_destroy(&ppe->l2_flows);
  error_flow_table_destroy:
-@@ -2614,6 +2753,10 @@
+@@ -2566,6 +2752,10 @@
  
  	WRITE_ONCE(airoha_ppe_active, NULL);
  
