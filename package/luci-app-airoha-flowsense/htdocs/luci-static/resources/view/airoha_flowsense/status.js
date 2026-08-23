@@ -35,6 +35,8 @@ var callGetConflictAlerts= rpc.declare({ object: 'luci.airoha_flowsense', method
 var callGetWifiStats     = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getWifiStats' });
 var callGetBridgeStats   = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getBridgeStats' });
 var callGetEthStats      = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getEthStats' });
+var callGetPingTarget    = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getPingTarget' });
+var callSetPingTarget    = rpc.declare({ object: 'luci.airoha_flowsense', method: 'setPingTarget', params: ['target'] });
 
 /* ── Theme-adaptive CSS ── */
 var themeCSS = '\
@@ -1283,7 +1285,8 @@ function renderCompassCards(cs, bypass, jitter, wan, wifi, bridge, mode) {
 	// West card: Latency
 	var latVal   = cs.latMs > 0 ? cs.latMs.toFixed(1)+'ms' : (jitter.available===false ? 'N/A' : '---');
 	var latColor = cs.latColor;
-	var latSub   = 'Jitter: '+(jitter.jitter||0).toFixed(1)+'ms  |  '+(jitter.samples||0)+' samples  |  '+(jitter.target||'1.1.1.1');
+	var latTarget = jitter.target||'223.5.5.5';
+	var latSub   = 'Jitter: '+(jitter.jitter||0).toFixed(1)+'ms  |  '+(jitter.samples||0)+' samples  |  Ping: '+latTarget+' ✏';
 
 	function card(title, val, color, sub) {
 		return E('div', { 'class': 'compass-card' }, [
@@ -1293,12 +1296,37 @@ function renderCompassCards(cs, bypass, jitter, wan, wifi, bridge, mode) {
 		]);
 	}
 
-	return E('div', { 'class': 'compass-cards', 'id': 'compass-cards' }, [
+	var cards = E('div', { 'class': 'compass-cards', 'id': 'compass-cards' }, [
 		card('NPU Path',    northVal, northColor, northSub),
 		card('Integrity',   eastVal,  eastColor,  eastSub),
 		card('Latency',     latVal,   latColor,   latSub),
 		card('HW Buffer',   southVal, southColor, southSub)
 	]);
+	attachPingTargetEditor(cards.querySelectorAll('.compass-card-sub')[2], latTarget);
+
+	return cards;
+}
+
+function attachPingTargetEditor(element, target) {
+	if (!element) return;
+
+	element.style.cursor = 'pointer';
+	element.title = _('Click to change ping target');
+	element.onclick = function() {
+		var newTarget = window.prompt(_('Ping target IP:'), target);
+		if (!newTarget || newTarget === target) return;
+
+		callSetPingTarget(newTarget).then(function(res) {
+			if (res && res.success) {
+				window.alert(_('Ping target changed to: ') + res.target);
+				window.location.reload();
+			} else {
+				window.alert(res && res.error ? res.error : _('Failed to set ping target'));
+			}
+		}).catch(function(err) {
+			window.alert(_('Error: ') + err.message);
+		});
+	};
 }
 
 function updateCompassCards(cs, bypass, jitter, wan, wifi, bridge, mode) {
@@ -1346,8 +1374,10 @@ function updateCompassCards(cs, bypass, jitter, wan, wifi, bridge, mode) {
 	}
 
 	var latVal = cs.latMs > 0 ? cs.latMs.toFixed(1)+'ms' : (jitter.available===false?'N/A':'---');
+	var latTarget = jitter.target||'223.5.5.5';
 	setCard(divs[2], latVal, cs.latColor,
-		'Jitter: '+(jitter.jitter||0).toFixed(1)+'ms  |  '+(jitter.samples||0)+' samples  |  '+(jitter.target||'1.1.1.1'));
+		'Jitter: '+(jitter.jitter||0).toFixed(1)+'ms  |  '+(jitter.samples||0)+' samples  |  Ping: '+latTarget+' ✏');
+	attachPingTargetEditor(divs[2] && divs[2].querySelector('.compass-card-sub'), latTarget);
 
 	var hb = cs.hwBuf || {};
 	setCard(divs[3],

@@ -10,6 +10,9 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+msgid "AP Mode Acceleration"
+msgstr "AP 模式加速"
+
 #: ../../package/luci-app-airoha-npu/htdocs/luci-static/resources/view/airoha_npu/status.js:507
 msgid "%d cores"
 msgstr "%d 个核心"

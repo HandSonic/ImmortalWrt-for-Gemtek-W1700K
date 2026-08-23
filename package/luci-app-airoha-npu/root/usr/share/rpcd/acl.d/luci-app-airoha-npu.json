@@ -3,7 +3,7 @@
 		"description": "Grant access to Airoha SoC status (NPU + CPU + Overclock)",
 		"read": {
 			"ubus": {
-				"luci.airoha_npu": [ "getStatus", "getPpeEntries", "getTokenInfo", "getFrameEngine", "getVlanOffload", "getPPPoEOffload" ]
+				"luci.airoha_npu": [ "getStatus", "getPpeEntries", "getTokenInfo", "getFrameEngine", "getVlanOffload", "getPPPoEOffload", "getApModeOffload" ]
 			},
 			"file": {
 				"/sys/kernel/debug/ppe/entries": [ "read" ],
@@ -14,12 +14,17 @@
 		},
 		"write": {
 			"ubus": {
-				"luci.airoha_npu": [ "setGovernor", "setMaxFreq", "setOverclock", "setVlanOffload", "setPPPoEOffload" ]
+				"luci.airoha_npu": [ "setGovernor", "setMaxFreq", "setOverclock", "setVlanOffload", "setPPPoEOffload", "setApModeOffload" ]
 			},
 			"file": {
 				"/sys/devices/system/cpu/cpufreq/policy0/scaling_governor": [ "write" ],
 				"/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq": [ "write" ],
-				"/dev/mem": [ "read", "write" ]
+				"/dev/mem": [ "read", "write" ],
+				"/proc/sys/net/bridge/bridge-nf-call-iptables": [ "read", "write" ],
+				"/proc/sys/net/bridge/bridge-nf-call-ip6tables": [ "read", "write" ],
+				"/proc/sys/net/bridge/bridge-nf-filter-vlan-tagged": [ "read", "write" ],
+				"/proc/sys/net/bridge/bridge-nf-pass-vlan-input-dev": [ "read", "write" ],
+				"/etc/sysctl.d/16-apmode-offload.conf": [ "write" ]
 			}
 		}
 	}

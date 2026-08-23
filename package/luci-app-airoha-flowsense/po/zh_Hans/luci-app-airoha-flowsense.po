@@ -3,6 +3,24 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: zh_Hans\n"
 
+msgid "Click to change ping target"
+msgstr "点击修改测试 IP"
+
+msgid "Ping target IP:"
+msgstr "测试 IP："
+
+msgid "Ping target changed to: "
+msgstr "测试 IP 已修改为："
+
+msgid "Failed to set ping target"
+msgstr "修改测试 IP 失败"
+
+msgid "Invalid target parameter"
+msgstr "无效的测试 IP"
+
+msgid "Target is too long"
+msgstr "测试 IP 过长"
+
 msgid "Airoha FlowSense"
 msgstr "Airoha 流量传感器"
 

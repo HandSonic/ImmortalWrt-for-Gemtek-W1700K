@@ -15,6 +15,8 @@ var callGetVlanOffload = rpc.declare({ object: 'luci.airoha_npu', method: 'getVl
 var callSetVlanOffload = rpc.declare({ object: 'luci.airoha_npu', method: 'setVlanOffload', params: ['enabled'] });
 var callGetPPPoEOffload = rpc.declare({ object: 'luci.airoha_npu', method: 'getPPPoEOffload', nobatch: true });
 var callSetPPPoEOffload = rpc.declare({ object: 'luci.airoha_npu', method: 'setPPPoEOffload', params: ['enabled'] });
+var callGetApModeOffload = rpc.declare({ object: 'luci.airoha_npu', method: 'getApModeOffload', nobatch: true });
+var callSetApModeOffload = rpc.declare({ object: 'luci.airoha_npu', method: 'setApModeOffload', params: ['enabled'] });
 
 var ppeSnapshot = { entries: [], truncated: false };
 
@@ -24,9 +26,10 @@ function loadStatusData() {
 		L.resolveDefault(callTokenInfo(), { tx_queues: [], station_counts: [] }),
 		L.resolveDefault(callFrameEngine(), { error: 'unavailable' }),
 		L.resolveDefault(callGetVlanOffload(), { enabled: 0 }),
-		L.resolveDefault(callGetPPPoEOffload(), { enabled: 0 })
+		L.resolveDefault(callGetPPPoEOffload(), { enabled: 0 }),
+		L.resolveDefault(callGetApModeOffload(), { enabled: 0 })
 	]).then(function(data) {
-		return [data[0], ppeSnapshot, data[1], data[2], data[3], data[4]];
+		return [data[0], ppeSnapshot, data[1], data[2], data[3], data[4], data[5]];
 	});
 }
 
@@ -504,6 +507,21 @@ function renderPPPoEOffloadSelect(state) {
 		E('option', { 'value': '1', 'selected': cur === '1' ? '' : null }, _('Enabled'))
 	]);
 }
+function renderApModeOffloadSelect(state) {
+	if (!state || state.available === false) return E('span', { 'class': 'soc-muted' }, _('Not available'));
+	var cur = state.enabled ? '1' : '0';
+	return E('select', { 'id': 'apmode-offload-select', 'class': 'cbi-input-select', 'style': 'min-width:140px', 'change': function(ev) {
+		var v = parseInt(ev.target.value);
+		ev.target.disabled = true;
+		callSetApModeOffload(v).then(function(r) {
+			ev.target.disabled = false;
+			if (r && r.error) ui.addNotification(null, E('p', {}, _('Error:') + ' ' + r.error), 'error');
+		}).catch(function() { ev.target.disabled = false; });
+	}}, [
+		E('option', { 'value': '0', 'selected': cur === '0' ? '' : null }, _('Disabled')),
+		E('option', { 'value': '1', 'selected': cur === '1' ? '' : null }, _('Enabled'))
+	]);
+}
 
 /* ── Main View ── */
 return view.extend({
@@ -513,7 +531,7 @@ return view.extend({
 
 	render: function(data) {
 		injectCSS();
-		var st = data[0]||{}, ppe = data[1]||{}, ti = data[2]||{}, fe = data[3]||{}, vo = data[4]||{}, po = data[5]||{};
+		var st = data[0]||{}, ppe = data[1]||{}, ti = data[2]||{}, fe = data[3]||{}, vo = data[4]||{}, po = data[5]||{}, ao = data[6]||{};
 		var entries = Array.isArray(ppe.entries) ? ppe.entries : [];
 		st = addPpeStats(st, ppe);
 		var memR = Array.isArray(st.memory_regions) ? st.memory_regions : [];
@@ -548,6 +566,8 @@ return view.extend({
 						E('td',{'class':'td'}, renderVlanOffloadSelect(vo)) ]),
 					E('tr',{'class':'tr'},[ E('td',{'class':'td'},E('strong',{},_('PPPoE Fast Path'))),
 						E('td',{'class':'td'}, renderPPPoEOffloadSelect(po)) ])
+					E('tr',{'class':'tr'},[ E('td',{'class':'td'},E('strong',{},_('AP Mode Acceleration'))),
+						E('td',{'class':'td'}, renderApModeOffloadSelect(ao)) ])
 				]),
 
 				// Frame Engine diagram (includes WiFi bands, PPE flows, NPU indicator)
@@ -570,7 +590,7 @@ return view.extend({
 		poll.add(L.bind(function() {
 			return loadStatusData().then(L.bind(function(d) {
 				injectCSS();
-				var st=d[0]||{}, ppe=d[1]||{}, ti=d[2]||{}, fe=d[3]||{}, vo=d[4]||{}, po=d[5]||{};
+				var st=d[0]||{}, ppe=d[1]||{}, ti=d[2]||{}, fe=d[3]||{}, vo=d[4]||{}, po=d[5]||{}, ao=d[6]||{};
 				st = addPpeStats(st, ppe);
 
 				updateFreqBar(st.cpu_cur_freq||st.cpu_hw_freq,st.cpu_min_freq,st.cpu_max_freq,st.pll_freq_mhz,st.cpu_governor);
@@ -578,6 +598,7 @@ return view.extend({
 				var fs=document.getElementById('cpu-maxfreq-select'); if(fs&&!fs.matches(':focus')) fs.value=(st.cpu_max_freq||0).toString();
 				var vs=document.getElementById('vlan-offload-select'); if(vs&&!vs.matches(':focus')) vs.value=(vo.enabled?'1':'0');
 				var ps=document.getElementById('pppoe-offload-select'); if(ps&&!ps.matches(':focus')) ps.value=(po.enabled?'1':'0');
+			var as=document.getElementById('apmode-offload-select'); if(as&&!as.matches(':focus')) as.value=(ao.enabled?'1':'0');
 
 				var se=document.getElementById('npu-status'), ns=npuState(st,ti);
 				if(se){se.innerHTML='';var sp=document.createElement('span');sp.className=ns.className;sp.textContent=ns.text+(st.npu_device?' ('+st.npu_device+')':'');se.appendChild(sp);}
