@@ -15,7 +15,7 @@
 		},
 		"write": {
 			"ubus": {
-				"luci.airoha_flowsense": [ "setVlanOffload", "setFlowOffload", "setPppoeOffload", "setPingTarget" ]
+				"luci.airoha_flowsense": [ "setPingTarget" ]
 			},
 			"file": {
 				"/proc/sys/net/bridge/bridge-nf-filter-vlan-tagged": [ "read", "write" ],

@@ -1146,7 +1146,7 @@ get_overview() {
 
 case "$1" in
 	list)
-		echo '{"getOverview":{},"getStatus":{},"getPpeEntries":{},"getTokenInfo":{},"getFrameEngine":{},"getTxStats":{},"getVlanOffload":{},"setVlanOffload":{"enabled":"int"},"getFlowOffload":{},"setFlowOffload":{"enabled":"int"},"getPppoeOffload":{},"setPppoeOffload":{"enabled":"int"},"getApModeOffload":{},"getDeviceMode":{},"getWanHealth":{},"getJitterResult":{},"getWifiStats":{},"getBridgeStats":{},"getNpuBypass":{},"getConflictAlerts":{},"getEthStats":{},"getPingTarget":{},"setPingTarget":{"target":"str"}}'
+		echo '{"getOverview":{},"getStatus":{},"getPpeEntries":{},"getTokenInfo":{},"getFrameEngine":{},"getTxStats":{},"getVlanOffload":{},"getFlowOffload":{},"getPppoeOffload":{},"getApModeOffload":{},"getDeviceMode":{},"getWanHealth":{},"getJitterResult":{},"getWifiStats":{},"getBridgeStats":{},"getNpuBypass":{},"getConflictAlerts":{},"getEthStats":{},"getPingTarget":{},"setPingTarget":{"target":"str"}}'
 		;;
 	call)
 		case "$2" in
@@ -1171,26 +1171,14 @@ case "$1" in
 			getVlanOffload)
 				get_vlan_offload
 				;;
-			setVlanOffload)
-				read input
-				set_vlan_offload "$input"
-				;;
 			getFlowOffload)
 				get_flow_offload
-				;;
-			setFlowOffload)
-				read input
-				set_flow_offload "$input"
 				;;
 			getPppoeOffload)
 				get_pppoe_offload
 				;;
 			getApModeOffload)
 				get_apmode_offload
-				;;
-			setPppoeOffload)
-				read input
-				set_pppoe_offload "$input"
 				;;
 			getDeviceMode)
 				get_device_mode
