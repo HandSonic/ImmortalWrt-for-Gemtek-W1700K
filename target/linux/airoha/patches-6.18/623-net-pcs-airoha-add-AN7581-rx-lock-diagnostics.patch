@@ -14,7 +14,7 @@ Signed-off-by: naoki66 <naoki66@qq.com>
  drivers/net/pcs/airoha/pcs-airoha-common.c |  5 +++++
  drivers/net/pcs/airoha/pcs-airoha.h        |  2 ++
  drivers/net/pcs/airoha/pcs-an7581.c        | 32 +++++++++++++++++++++--
- 3 files changed, 39 insertions(+), 3 deletions(-)
+ 3 files changed, 44 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/net/pcs/airoha/pcs-airoha-common.c b/drivers/net/pcs/airoha/pcs-airoha-common.c
 index ba1aa2050fc..dc9c06fec9c 100644
@@ -26,8 +26,8 @@ index ba1aa2050fc..dc9c06fec9c 100644
  	phylink_decode_usxgmii_word(state, lpa);
 +
 +	if (data->rxlock_workaround && !state->link)
-+		dev_info_ratelimited(priv->dev,
-+				     "port %d USXGMII AN down: stats0=%#010x stats2=%#010x\n",
++		dev_dbg_ratelimited(priv->dev,
++				    "port %d USXGMII AN down: stats0=%#010x stats2=%#010x\n",
 +				     index, lpa, an_done);
  }
  
@@ -49,7 +49,7 @@ diff --git a/drivers/net/pcs/airoha/pcs-an7581.c b/drivers/net/pcs/airoha/pcs-an
 index 6deb95331ab..fb0888d2d85 100644
 --- a/drivers/net/pcs/airoha/pcs-an7581.c
 +++ b/drivers/net/pcs/airoha/pcs-an7581.c
-@@ -2117,9 +2117,34 @@ static bool an7581_pcs_have_rx_signal(struct airoha_pcs_priv *priv, int index)
+@@ -2117,9 +2117,40 @@ static bool an7581_pcs_have_rx_signal(struct airoha_pcs_priv *priv, int index)
  	return count >= 4;
  }
  
@@ -71,10 +71,16 @@ index 6deb95331ab..fb0888d2d85 100644
 +	regmap_read(pcs_pma, AIROHA_PCS_PMA_RX_FREQDET, &freqdet);
 +	regmap_read(pcs_pma, AIROHA_PCS_PMA_SW_RST_SET, &rst);
 +
-+	dev_info_ratelimited(priv->dev,
-+			     "port %d USXGMII RX: pcs=%#010x base-r=%#010x an=%#010x an-done=%#010x sigdet=%u freqdet=%#010x rst=%#010x action=%s resets=%u\n",
-+			     index, pcs_status, base_r, an_status, an_done, signal,
-+			     freqdet, rst, action, priv->rxlock_reset_count[index]);
++	if (signal)
++		dev_info_ratelimited(priv->dev,
++				     "port %d USXGMII RX: pcs=%#010x base-r=%#010x an=%#010x an-done=%#010x sigdet=%u freqdet=%#010x rst=%#010x action=%s resets=%u\n",
++				     index, pcs_status, base_r, an_status, an_done, signal,
++				     freqdet, rst, action, priv->rxlock_reset_count[index]);
++	else
++		dev_dbg_ratelimited(priv->dev,
++				    "port %d USXGMII RX: pcs=%#010x base-r=%#010x an=%#010x an-done=%#010x sigdet=%u freqdet=%#010x rst=%#010x action=%s resets=%u\n",
++				    index, pcs_status, base_r, an_status, an_done, signal,
++				    freqdet, rst, action, priv->rxlock_reset_count[index]);
 +}
 +
  int an7581_pcs_rxlock_workaround(struct airoha_pcs_priv *priv, int index)
@@ -84,7 +90,7 @@ index 6deb95331ab..fb0888d2d85 100644
  	u32 val;
  
  	/* Check if PCS is UP or Down */
-@@ -2127,14 +2152,18 @@ int an7581_pcs_rxlock_workaround(struct airoha_pcs_priv *priv, int index)
+@@ -2127,14 +2158,18 @@ int an7581_pcs_rxlock_workaround(struct airoha_pcs_priv *priv, int index)
  	if (val & AIROHA_PCS_USXGMII_PCS_RX_LINK_STATUS_UP)
  		return 0;
  
