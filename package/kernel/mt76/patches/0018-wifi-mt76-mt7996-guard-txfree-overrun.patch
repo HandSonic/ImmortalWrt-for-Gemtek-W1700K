@@ -1,0 +1,29 @@
+From: fanboy <fanboy@openwrt.org>
+Date: Wed, 19 Aug 2026 15:54:54 +0000
+Subject: [PATCH] wifi: mt76: mt7996: guard truncated TXFREE events
+
+MT7996 firmware can occasionally emit a TXFREE event whose MSDU count is
+larger than the payload actually present.  Returning immediately skips the
+normal tail cleanup and leaks completed skbs and tokens.  Break out of the
+descriptor loop after the valid prefix and fall through to the normal
+cleanup path; the malformed remainder is dropped without a WARN splat.
+
+Signed-off-by: fanboy <fanboy@openwrt.org>
+---
+ mt7996/mac.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -1382,9 +1382,9 @@ mt7996_mac_tx_free(struct mt7996_dev *dev, void *data, int len)
+ 	for (cur_info = &tx_free[2]; count < total; cur_info++) {
+ 		u32 msdu, info;
+ 		u8 i;
+ 
+-		if (WARN_ON_ONCE((void *)cur_info >= end))
+-			return;
++		if ((void *)cur_info >= end)
++			break;
+ 		/* 1'b1: new wcid pair.
+ 		 * 1'b0: msdu_id with the same 'wcid pair' as above.
+ 		 */
