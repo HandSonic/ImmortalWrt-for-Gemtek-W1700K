@@ -4,6 +4,50 @@
 
 . /lib/functions.sh
 
+# Cache expensive JSON producers across rpcd invocations and browser sessions.
+_cached_json() {
+	local key="$1"
+	local ttl="$2"
+	local generator="$3"
+	shift 3
+	local cache="/tmp/luci-airoha-flowsense.${key}.json"
+	local lock="${cache}.lock"
+	local tmp="${cache}.$$"
+	local now mtime
+
+	now=$(date +%s)
+	mtime=$(stat -c %Y "$cache" 2>/dev/null)
+	case "$mtime" in ''|*[!0-9]*) mtime=0 ;; esac
+	if [ -s "$cache" ] && [ $((now - mtime)) -lt "$ttl" ]; then
+		cat "$cache"
+		return
+	fi
+
+	if ! mkdir "$lock" 2>/dev/null; then
+		local lock_mtime
+		lock_mtime=$(stat -c %Y "$lock" 2>/dev/null)
+		case "$lock_mtime" in ''|*[!0-9]*) lock_mtime="$now" ;; esac
+		if [ $((now - lock_mtime)) -ge 30 ]; then
+			rmdir "$lock" 2>/dev/null
+			mkdir "$lock" 2>/dev/null || {
+				[ -s "$cache" ] && cat "$cache" || printf '{}'
+				return
+			}
+		else
+			[ -s "$cache" ] && cat "$cache" || printf '{}'
+			return
+		fi
+	fi
+
+	if "$generator" "$@" >"$tmp" && [ -s "$tmp" ]; then
+		mv "$tmp" "$cache"
+	else
+		rm -f "$tmp"
+	fi
+	rmdir "$lock" 2>/dev/null
+	[ -s "$cache" ] && cat "$cache" || printf '{}'
+}
+
 get_status() {
 	# === NPU Status ===
 	local npu_fw="/lib/firmware/airoha/en7581_MT7996_npu_rv32.bin"
@@ -448,34 +492,38 @@ get_tx_stats() {
 }
 
 get_vlan_offload() {
-	local val
-	val=$(cat /proc/sys/net/bridge/bridge-nf-filter-vlan-tagged 2>/dev/null)
-	printf '{"enabled":%d}' "${val:-0}"
+	local path="/proc/sys/net/bridge/bridge-nf-filter-vlan-tagged"
+	local filter
+
+	if [ ! -r "$path" ]; then
+		echo '{"available":false,"enabled":false}'
+		return
+	fi
+
+	filter=$(cat "$path" 2>/dev/null)
+	printf '{"available":true,"enabled":%s,"bridge_filter":%d}' 		"$([ "${filter:-1}" -eq 0 ] && echo true || echo false)" "${filter:-1}"
 }
 
 set_vlan_offload() {
-	local enabled
-	enabled=$(echo "$1" | jsonfilter -e "@.enabled" 2>/dev/null)
-
-	# jsonfilter returns empty string for integer 0; treat empty as 0
+	local enabled filter
+	enabled=$(echo "$1" | jsonfilter -e '@.enabled' 2>/dev/null)
 	[ -z "$enabled" ] && enabled="0"
-
 	if [ "$enabled" != "0" ] && [ "$enabled" != "1" ]; then
 		echo '{"error":"enabled must be 0 or 1"}'
 		return
 	fi
 
-	if ! echo "$enabled" > /proc/sys/net/bridge/bridge-nf-filter-vlan-tagged 2>/dev/null; then
+	# Bridge netfilter interception and hardware fast path are inverse.
+	filter=$((1 - enabled))
+	if ! echo "$filter" > /proc/sys/net/bridge/bridge-nf-filter-vlan-tagged 2>/dev/null; then
 		echo '{"error":"failed - bridge module may not be loaded"}'
 		return
 	fi
 
-	# Persist across reboots
-	echo "net.bridge.bridge-nf-filter-vlan-tagged=$enabled" > /etc/sysctl.d/14-vlan-offload.conf
+	echo "net.bridge.bridge-nf-filter-vlan-tagged=$filter" > /etc/sysctl.d/14-vlan-offload.conf
 	chmod 644 /etc/sysctl.d/14-vlan-offload.conf
 	printf '{"result":"ok","enabled":%d}' "$enabled"
 }
-
 get_flow_offload() {
 	local fo foh
 	fo=$(uci get firewall.@defaults[0].flow_offloading 2>/dev/null)
@@ -511,31 +559,64 @@ set_flow_offload() {
 }
 
 get_pppoe_offload() {
-	local val
-	val=$(cat /proc/sys/net/bridge/bridge-nf-filter-pppoe-tagged 2>/dev/null)
-	printf '{"enabled":%d}' "${val:-0}"
+	local path="/proc/sys/net/bridge/bridge-nf-filter-pppoe-tagged"
+	local filter
+
+	if [ ! -r "$path" ]; then
+		echo '{"available":false,"enabled":false}'
+		return
+	fi
+
+	filter=$(cat "$path" 2>/dev/null)
+	printf '{"available":true,"enabled":%s,"bridge_filter":%d}' 		"$([ "${filter:-1}" -eq 0 ] && echo true || echo false)" "${filter:-1}"
 }
 
 set_pppoe_offload() {
-	local enabled
-	enabled=$(echo "$1" | jsonfilter -e "@.enabled" 2>/dev/null)
-
+	local enabled filter
+	enabled=$(echo "$1" | jsonfilter -e '@.enabled' 2>/dev/null)
 	[ -z "$enabled" ] && enabled="0"
-
 	if [ "$enabled" != "0" ] && [ "$enabled" != "1" ]; then
 		echo '{"error":"enabled must be 0 or 1"}'
 		return
 	fi
 
-	if ! echo "$enabled" > /proc/sys/net/bridge/bridge-nf-filter-pppoe-tagged 2>/dev/null; then
+	filter=$((1 - enabled))
+	if ! echo "$filter" > /proc/sys/net/bridge/bridge-nf-filter-pppoe-tagged 2>/dev/null; then
 		echo '{"error":"failed - bridge module may not be loaded"}'
 		return
 	fi
 
-	# Persist across reboots
-	echo "net.bridge.bridge-nf-filter-pppoe-tagged=$enabled" > /etc/sysctl.d/15-pppoe-offload.conf
+	echo "net.bridge.bridge-nf-filter-pppoe-tagged=$filter" > /etc/sysctl.d/15-pppoe-offload.conf
 	chmod 644 /etc/sysctl.d/15-pppoe-offload.conf
 	printf '{"result":"ok","enabled":%d}' "$enabled"
+}
+_apmode_has_vlan_filtering() {
+	local path value
+
+	for path in /sys/class/net/*/bridge/vlan_filtering; do
+		[ -r "$path" ] || continue
+		value=$(cat "$path" 2>/dev/null)
+		[ "$value" = "1" ] && { echo 1; return; }
+	done
+
+	echo 0
+}
+
+get_apmode_offload() {
+	local ipt ip6t vlan_filtering filter_vlan_tagged pass_vlan_indev
+
+	ipt=$(cat /proc/sys/net/bridge/bridge-nf-call-iptables 2>/dev/null)
+	ip6t=$(cat /proc/sys/net/bridge/bridge-nf-call-ip6tables 2>/dev/null)
+	vlan_filtering=$(_apmode_has_vlan_filtering)
+	filter_vlan_tagged=$(cat /proc/sys/net/bridge/bridge-nf-filter-vlan-tagged 2>/dev/null)
+	pass_vlan_indev=$(cat /proc/sys/net/bridge/bridge-nf-pass-vlan-input-dev 2>/dev/null)
+
+	if [ "$ipt" = "1" ] && [ "$ip6t" = "1" ] && \
+	   { [ "$vlan_filtering" = "0" ] || { [ "$filter_vlan_tagged" = "1" ] && [ "$pass_vlan_indev" = "1" ]; }; }; then
+		printf '{"enabled":1}'
+	else
+		printf '{"enabled":0}'
+	fi
 }
 
 get_device_mode() {
@@ -976,7 +1057,12 @@ get_conflict_alerts() {
 get_eth_stats() {
 	printf '{"ports":['
 	local first=1
-	for iface in wan lan1 lan2 lan3 lan4; do
+	case "$(board_name 2>/dev/null)" in
+	gemtek,w1700k-ubi) interfaces="eth1 eth2 lan3 lan4" ;;
+	gemtek,xr1710g-ubi) interfaces="eth1 eth2 lan2 lan3" ;;
+	*) interfaces="wan lan1 lan2 lan3 lan4" ;;
+esac
+	for iface in $interfaces; do
 		local sys="/sys/class/net/$iface"
 		[ -d "$sys" ] || continue
 		local operstate up=false
@@ -1026,12 +1112,47 @@ set_ping_target() {
 	printf '{"success":true,"target":"%s"}' "$target"
 }
 
+get_overview() {
+	local status ppe token frame vlan tx mode bypass wan jitter alerts wifi bridge flow pppoe apmode eth
+	local ppe_bound ppe_unbound ppe_total
+
+	ppe=$(_cached_json ppe 10 get_ppe_entries)
+	ppe_bound=$(printf '%s' "$ppe" | jsonfilter -e '@.bnd.total' 2>/dev/null)
+	ppe_unbound=$(printf '%s' "$ppe" | jsonfilter -e '@.unb.total' 2>/dev/null)
+	case "$ppe_bound" in ''|*[!0-9]*) ppe_bound=0 ;; esac
+	case "$ppe_unbound" in ''|*[!0-9]*) ppe_unbound=0 ;; esac
+	ppe_total=$((ppe_bound + ppe_unbound))
+	status=$(_cached_json status 10 get_status "$ppe_bound" "$ppe_total")
+	token=$(_cached_json token 10 get_token_info)
+	frame=$(_cached_json frame 10 get_frame_engine)
+	vlan=$(get_vlan_offload)
+	tx=$(_cached_json tx 10 get_tx_stats)
+	mode=$(get_device_mode)
+	bypass=$(get_npu_bypass "$ppe_bound")
+	wan=$(get_wan_health)
+	jitter=$(get_jitter_result)
+	alerts=$(get_conflict_alerts)
+	wifi=$(_cached_json wifi 10 get_wifi_stats)
+	bridge=$(get_bridge_stats)
+	flow=$(get_flow_offload)
+	pppoe=$(get_pppoe_offload)
+	apmode=$(get_apmode_offload)
+	eth=$(get_eth_stats)
+
+	printf '{"status":%s,"ppe":%s,"token":%s,"frame":%s,"vlan":%s,"tx":%s,"mode":%s,"bypass":%s,"wan":%s,"jitter":%s,"alerts":%s,"wifi":%s,"bridge":%s,"flow":%s,"pppoe":%s,"apmode":%s,"eth":%s}' \
+		"$status" "$ppe" "$token" "$frame" "$vlan" "$tx" "$mode" "$bypass" \
+		"$wan" "$jitter" "$alerts" "$wifi" "$bridge" "$flow" "$pppoe" "$apmode" "$eth"
+}
+
 case "$1" in
 	list)
-		echo '{"getStatus":{},"getPpeEntries":{},"getTokenInfo":{},"getFrameEngine":{},"getTxStats":{},"getVlanOffload":{},"setVlanOffload":{"enabled":"int"},"getFlowOffload":{},"setFlowOffload":{"enabled":"int"},"getPppoeOffload":{},"setPppoeOffload":{"enabled":"int"},"getDeviceMode":{},"getWanHealth":{},"getJitterResult":{},"getWifiStats":{},"getBridgeStats":{},"getNpuBypass":{},"getConflictAlerts":{},"getEthStats":{},"getPingTarget":{},"setPingTarget":{"target":"str"}}'
+		echo '{"getOverview":{},"getStatus":{},"getPpeEntries":{},"getTokenInfo":{},"getFrameEngine":{},"getTxStats":{},"getVlanOffload":{},"setVlanOffload":{"enabled":"int"},"getFlowOffload":{},"setFlowOffload":{"enabled":"int"},"getPppoeOffload":{},"setPppoeOffload":{"enabled":"int"},"getApModeOffload":{},"getDeviceMode":{},"getWanHealth":{},"getJitterResult":{},"getWifiStats":{},"getBridgeStats":{},"getNpuBypass":{},"getConflictAlerts":{},"getEthStats":{},"getPingTarget":{},"setPingTarget":{"target":"str"}}'
 		;;
 	call)
 		case "$2" in
+			getOverview)
+				get_overview
+				;;
 			getStatus)
 				get_status
 				;;
@@ -1063,6 +1184,9 @@ case "$1" in
 				;;
 			getPppoeOffload)
 				get_pppoe_offload
+				;;
+			getApModeOffload)
+				get_apmode_offload
 				;;
 			setPppoeOffload)
 				read input

@@ -3,7 +3,7 @@
 		"description": "Grant access to Airoha SoC status (NPU + CPU + Overclock)",
 		"read": {
 			"ubus": {
-				"luci.airoha_npu": [ "getStatus", "getPpeEntries", "getTokenInfo", "getFrameEngine", "getVlanOffload", "getPPPoEOffload", "getApModeOffload" ]
+				"luci.airoha_npu": [ "getStatus", "getPpeEntries", "getTokenInfo", "getFrameEngine", "getVlanOffload", "getPPPoEOffload", "getFlowOffload", "getApModeOffload" ]
 			},
 			"file": {
 				"/sys/kernel/debug/ppe/entries": [ "read" ],
@@ -14,7 +14,7 @@
 		},
 		"write": {
 			"ubus": {
-				"luci.airoha_npu": [ "setGovernor", "setMaxFreq", "setOverclock", "setVlanOffload", "setPPPoEOffload", "setApModeOffload" ]
+				"luci.airoha_npu": [ "setGovernor", "setMaxFreq", "setOverclock", "setVlanOffload", "setPPPoEOffload", "setFlowOffload", "setApModeOffload" ]
 			},
 			"file": {
 				"/sys/devices/system/cpu/cpufreq/policy0/scaling_governor": [ "write" ],

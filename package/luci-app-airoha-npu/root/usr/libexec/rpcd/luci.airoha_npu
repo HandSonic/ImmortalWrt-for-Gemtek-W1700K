@@ -733,6 +733,38 @@ set_pppoe_offload() {
 	printf '{"result":"ok","enabled":%d}' "$enabled"
 }
 
+get_flow_offload() {
+	local fo foh
+	fo=$(uci -q get firewall.@defaults[0].flow_offloading)
+	foh=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
+	if [ "$fo" = "1" ] && [ "$foh" = "1" ]; then
+		printf '{"enabled":1}'
+	else
+		printf '{"enabled":0}'
+	fi
+}
+
+set_flow_offload() {
+	local enabled
+	enabled=$(echo "$1" | jsonfilter -e '@.enabled' 2>/dev/null)
+	[ -z "$enabled" ] && enabled="0"
+	if [ "$enabled" != "0" ] && [ "$enabled" != "1" ]; then
+		echo '{"error":"enabled must be 0 or 1"}'
+		return
+	fi
+
+	if [ "$enabled" = "1" ]; then
+		uci set firewall.@defaults[0].flow_offloading='1'
+		uci set firewall.@defaults[0].flow_offloading_hw='1'
+	else
+		uci -q delete firewall.@defaults[0].flow_offloading
+		uci -q delete firewall.@defaults[0].flow_offloading_hw
+	fi
+	uci commit firewall
+	/etc/init.d/firewall reload >/dev/null 2>&1
+	printf '{"result":"ok","enabled":%d}' "$enabled"
+}
+
 _apmode_has_vlan_filtering() {
 	local path value
 
@@ -800,7 +832,7 @@ set_apmode_offload() {
 
 case "$1" in
 	list)
-		echo '{"getStatus":{},"getPpeEntries":{},"getTokenInfo":{},"getFrameEngine":{},"setGovernor":{"governor":"str"},"setMaxFreq":{"freq":"int"},"setOverclock":{"freq_mhz":"int"},"getVlanOffload":{},"setVlanOffload":{"enabled":"int"},"getPPPoEOffload":{},"setPPPoEOffload":{"enabled":"int"},"getApModeOffload":{},"setApModeOffload":{"enabled":"int"}}'
+		echo '{"getStatus":{},"getPpeEntries":{},"getTokenInfo":{},"getFrameEngine":{},"setGovernor":{"governor":"str"},"setMaxFreq":{"freq":"int"},"setOverclock":{"freq_mhz":"int"},"getVlanOffload":{},"setVlanOffload":{"enabled":"int"},"getPPPoEOffload":{},"setPPPoEOffload":{"enabled":"int"},"getFlowOffload":{},"setFlowOffload":{"enabled":"int"},"getApModeOffload":{},"setApModeOffload":{"enabled":"int"}}'
 		;;
 	call)
 		case "$2" in
@@ -841,6 +873,13 @@ case "$1" in
 			setPPPoEOffload)
 				read input
 				set_pppoe_offload "$input"
+				;;
+			getFlowOffload)
+				get_flow_offload
+				;;
+			setFlowOffload)
+				read input
+				set_flow_offload "$input"
 				;;
 			getApModeOffload)
 				get_apmode_offload

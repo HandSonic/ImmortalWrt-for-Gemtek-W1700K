@@ -34,6 +34,7 @@ var callGetJitterResult  = rpc.declare({ object: 'luci.airoha_flowsense', method
 var callGetConflictAlerts= rpc.declare({ object: 'luci.airoha_flowsense', method: 'getConflictAlerts' });
 var callGetWifiStats     = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getWifiStats' });
 var callGetBridgeStats   = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getBridgeStats' });
+var callGetOverview     = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getOverview' });
 var callGetEthStats      = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getEthStats' });
 var callGetPingTarget    = rpc.declare({ object: 'luci.airoha_flowsense', method: 'getPingTarget' });
 var callSetPingTarget    = rpc.declare({ object: 'luci.airoha_flowsense', method: 'setPingTarget', params: ['target'] });
@@ -66,6 +67,38 @@ var themeCSS = '\
 .offload-badge{font-size:13px;font-weight:700;letter-spacing:1px;padding:0 10px;border-radius:3px;font-family:monospace;display:inline-flex;align-items:center;align-self:stretch}\
 .offload-on{background:rgba(0,255,0,0.12);color:#00ff00;border:1px solid rgba(0,255,0,0.35)}\
 .offload-off{background:rgba(255,160,0,0.15);color:#ffa000;border:1px solid rgba(255,160,0,0.35)}\
+.mode-status-grid{display:grid;grid-template-columns:minmax(210px,1.45fr) repeat(4,minmax(125px,1fr));gap:8px;margin-top:10px}\
+.mode-status-card{background:var(--soc-card-bg);border:1px solid var(--soc-border);border-left:3px solid var(--soc-border);border-radius:8px;padding:9px 14px;min-width:0;min-height:70px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;transition:border-color .3s}\
+.mode-status-card.mode-ap{border-left-color:#00c8ff}\
+.mode-status-card.mode-router{border-left-color:#00cc44}\
+.mode-status-card.mode-detecting{border-left-color:#b45309}\
+.mode-status-card.accel-on{border-left-color:#00cc44}\
+.mode-status-card.accel-off{border-left-color:#6b7280}\
+.mode-status-card .compass-card-title{line-height:1.25}\
+.mode-status-card .compass-card-value{font-size:18px;line-height:1.25}\
+.mode-status-card .compass-card-sub{line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\
+.offload-row{display:grid;grid-template-columns:repeat(3,minmax(175px,1fr));gap:8px;padding:0;margin:12px 0}\
+.offload-item{background:var(--soc-card-bg);border:1px solid var(--soc-border);border-left:3px solid var(--soc-border);border-radius:12px;padding:11px 14px;min-width:0;min-height:58px;box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px}\
+.offload-item:has(.offload-on){border-left-color:#22c55e}\
+.offload-item:has(.offload-off){border-left-color:#6b7280}\
+.offload-name{display:flex;align-items:center;gap:10px;min-width:0;font-size:13px;line-height:1.4;font-weight:500}\
+.offload-name .soc-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\
+.offload-dot{width:8px;height:8px;border-radius:50%;background:#9ca3af;flex:0 0 auto;transition:background .25s,box-shadow .25s}\
+.offload-item:has(.offload-on) .offload-dot{background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.12)}\
+.offload-controls{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:128px}\
+.npu-toggle{position:relative;display:inline-flex;width:52px;height:30px;flex:0 0 auto;cursor:pointer}\
+.npu-toggle-input{position:absolute;width:1px;height:1px;opacity:0;margin:0}\
+.npu-toggle-track{position:absolute;inset:0;border:1px solid #cbd5e1;border-radius:999px;background:#d7dce2;transition:background .25s,border-color .25s,box-shadow .25s}\
+.npu-toggle-track:before{content:"";position:absolute;width:24px;height:24px;left:2px;top:2px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.24);transition:transform .25s}\
+.npu-toggle-input:checked+.npu-toggle-track{background:#22c55e;border-color:#16a34a}\
+.npu-toggle-input:checked+.npu-toggle-track:before{transform:translateX(22px)}\
+.npu-toggle-input:focus-visible+.npu-toggle-track{box-shadow:0 0 0 3px rgba(0,200,255,.25)}\
+.npu-toggle-input:disabled+.npu-toggle-track{opacity:.55;cursor:wait}\
+.offload-badge{font-size:12px;font-weight:600;line-height:1.4;letter-spacing:0;padding:0;border:0;background:transparent;font-family:inherit;display:inline-flex;align-items:center;white-space:nowrap}\
+.offload-on{color:#16a34a;background:transparent;border:0}\
+.offload-off{color:#6b7280;background:transparent;border:0}\
+@media(max-width:1050px){.mode-status-grid{grid-template-columns:repeat(3,minmax(150px,1fr))}.offload-row{grid-template-columns:repeat(2,minmax(180px,1fr))}}\
+@media(max-width:640px){.mode-status-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.mode-status-card:first-child{grid-column:1/-1}.offload-row{grid-template-columns:1fr}.offload-item{min-height:62px;padding:12px 14px}.offload-controls{min-width:132px}}\
 .alert-wrap{margin-bottom:8px}\
 .alert-item{display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-radius:5px;margin-bottom:5px;font-size:13px}\
 .alert-warning{border-left:3px solid #f5a623;background:rgba(245,166,35,0.1)}\
@@ -243,48 +276,79 @@ function freqBarState(hw, min, max, pll, gov) {
 
 
 
-function renderVlanOffloadSelect(enabled) {
-	var cur = enabled ? '1' : '0';
-	return E('select', { 'id': 'vlan-offload-select', 'class': 'cbi-input-select', 'style': 'min-width:140px', 'change': function(ev) {
-		var v = parseInt(ev.target.value);
-		ev.target.disabled = true;
-		callSetVlanOffload(v).then(function(r) {
-			ev.target.disabled = false;
-			if (r && r.error) ui.addNotification(null, E('p', {}, _('Error: ') + r.error), 'error');
-		}).catch(function() { ev.target.disabled = false; });
-	}}, [
-		E('option', { 'value': '0', 'selected': cur === '0' ? '' : null }, _('Disabled')),
-		E('option', { 'value': '1', 'selected': cur === '1' ? '' : null }, _('Enabled'))
+function renderOffloadBadge(enabled, id) {
+	enabled = isEnabled(enabled);
+	return E('span', {
+		'id': id,
+		'class': 'offload-badge ' + (enabled ? 'offload-on' : 'offload-off')
+	}, enabled ? _('Enabled') : _('Disabled'));
+}
+
+function renderOffloadToggle(enabled, id, callFn, badgeId) {
+	enabled = isEnabled(enabled);
+	var toggle = E('input', {
+		'id': id,
+		'type': 'checkbox',
+		'class': 'npu-toggle-input',
+		'change': function(ev) {
+			var val = ev.target.checked ? 1 : 0;
+			ev.target.disabled = true;
+			callFn(val).then(function(r) {
+				ev.target.disabled = false;
+				if (r && r.error) {
+					ev.target.checked = !val;
+					ui.addNotification(null, E('p', {}, _('Error:') + ' ' + r.error), 'error');
+				} else {
+					var b = document.getElementById(badgeId);
+					if (b) {
+						b.className = 'offload-badge ' + (val ? 'offload-on' : 'offload-off');
+						b.textContent = val ? _('Enabled') : _('Disabled');
+					}
+				}
+			}).catch(function() {
+				ev.target.checked = !val;
+				ev.target.disabled = false;
+			});
+		}
+	});
+	toggle.checked = enabled;
+
+	return E('div', { 'class': 'offload-controls' }, [
+		E('label', { 'class': 'npu-toggle', 'title': enabled ? _('Click to disable') : _('Click to enable') }, [
+			toggle,
+			E('span', { 'class': 'npu-toggle-track' })
+		]),
+		renderOffloadBadge(enabled, badgeId)
+	]);
+}
+
+function renderOffloadItem(title, enabled, id, callFn, badgeId) {
+	return E('div', { 'class': 'offload-item' }, [
+		E('span', { 'class': 'offload-name' }, [
+			E('span', { 'class': 'offload-dot' }),
+			E('span', { 'class': 'soc-text' }, title)
+		]),
+		renderOffloadToggle(enabled, id, callFn, badgeId)
 	]);
 }
 
 function renderFlowOffloadSelect(enabled) {
-	var cur = enabled ? '1' : '0';
-	return E('select', { 'id': 'flow-offload-select', 'class': 'cbi-input-select', 'style': 'min-width:140px', 'change': function(ev) {
-		var v = parseInt(ev.target.value);
-		ev.target.disabled = true;
-		callSetFlowOffload(v).then(function(r) {
-			ev.target.disabled = false;
-			if (r && r.error) ui.addNotification(null, E('p', {}, _('Error: ') + r.error), 'error');
-		}).catch(function() { ev.target.disabled = false; });
-	}}, [
-		E('option', { 'value': '0', 'selected': cur === '0' ? '' : null }, _('Disabled')),
-		E('option', { 'value': '1', 'selected': cur === '1' ? '' : null }, _('Enabled'))
-	]);
+	return renderOffloadToggle(enabled, 'flow-offload-select', callSetFlowOffload, 'flow-offload-badge');
+}
+
+function renderVlanOffloadSelect(enabled) {
+	return renderOffloadToggle(enabled, 'vlan-offload-select', callSetVlanOffload, 'vlan-offload-badge');
 }
 
 function renderPppoeOffloadSelect(enabled) {
-	var cur = enabled ? '1' : '0';
-	return E('select', { 'id': 'pppoe-offload-select', 'class': 'cbi-input-select', 'style': 'min-width:140px', 'change': function(ev) {
-		var v = parseInt(ev.target.value);
-		ev.target.disabled = true;
-		callSetPppoeOffload(v).then(function(r) {
-			ev.target.disabled = false;
-			if (r && r.error) ui.addNotification(null, E('p', {}, _('Error: ') + r.error), 'error');
-		}).catch(function() { ev.target.disabled = false; });
-	}}, [
-		E('option', { 'value': '0', 'selected': cur === '0' ? '' : null }, _('Disabled')),
-		E('option', { 'value': '1', 'selected': cur === '1' ? '' : null }, _('Enabled'))
+	return renderOffloadToggle(enabled, 'pppoe-offload-select', callSetPppoeOffload, 'pppoe-offload-badge');
+}
+
+function renderOffloadControls(flo, vo, ppo) {
+	return E('div', { 'class': 'offload-row' }, [
+		renderOffloadItem(_('HW Flow Offload'), flo.enabled, 'flow', callSetFlowOffload, 'flow-offload-badge'),
+		renderOffloadItem(_('VLAN Offload'), vo.enabled, 'vlan', callSetVlanOffload, 'vlan-offload-badge'),
+		renderOffloadItem(_('PPPoE Offload'), ppo.enabled, 'pppoe', callSetPppoeOffload, 'pppoe-offload-badge')
 	]);
 }
 
@@ -1386,27 +1450,87 @@ function updateCompassCards(cs, bypass, jitter, wan, wifi, bridge, mode) {
 		'PSE Δ: '+hb.pseDelta+' CDM Δ: '+hb.cdmHwfDelta+' | PPE: '+hb.ppePct+'% BND ('+hb.ppeBound+'/'+hb.ppeTotal+')');
 }
 
+/* ── Mode And Acceleration Status Cards ── */
+function getModeReasonText(reason) {
+	var reasonMap = {
+		dhcp_disabled: _('DHCP disabled in UCI'),
+		no_wan: _('No WAN IP detected'),
+		local_gateway: _('Local gateway detected')
+	};
+	return reasonMap[reason] || '';
+}
+
+function modeStatusData(dm, apo, flo, vo, ppo) {
+	dm = dm || {}; apo = apo || {}; flo = flo || {}; vo = vo || {}; ppo = ppo || {};
+	var mode = dm.mode || '';
+	var reason = getModeReasonText(dm.reason || '');
+	var detected = mode ? _('Auto-detected') + (reason ? ' — ' + reason : '') : _('Detecting...');
+
+	function accelerationCard(id, title, enabled) {
+		return {
+			id: id,
+			title: title,
+			value: enabled ? _('Enabled') : _('Disabled'),
+			sub: '',
+			color: enabled ? '#00cc44' : '#6b7280',
+			cls: 'acceleration-card ' + (enabled ? 'accel-on' : 'accel-off')
+		};
+	}
+
+	return [
+		{
+			id: 'mode-status-mode',
+			title: _('Work Mode'),
+			value: mode === 'ap' ? _('AP MODE') : mode === 'router' ? _('ROUTER MODE') : _('DETECTING'),
+			sub: detected,
+			color: mode === 'ap' ? '#00c8ff' : mode === 'router' ? '#00cc44' : '#b45309',
+			cls: mode === 'ap' ? 'mode-ap' : mode === 'router' ? 'mode-router' : 'mode-detecting'
+		},
+		accelerationCard('mode-status-ap', _('AP Mode Acceleration'), isEnabled(apo.enabled)),
+		accelerationCard('mode-status-flow', _('HW Flow Offload'), isEnabled(flo.enabled)),
+		accelerationCard('mode-status-vlan', _('VLAN Offload'), isEnabled(vo.enabled)),
+		accelerationCard('mode-status-pppoe', _('PPPoE Offload'), isEnabled(ppo.enabled))
+	];
+}
+
+function renderModeStatusCards(dm, apo, flo, vo, ppo) {
+	return E('div', { 'class': 'mode-status-grid', 'id': 'mode-status-grid' },
+		modeStatusData(dm, apo, flo, vo, ppo).map(function(card) {
+			var children = [
+				E('div', { 'class': 'compass-card-title' }, card.title),
+				E('div', { 'class': 'compass-card-value', 'style': 'color:' + card.color }, card.value)
+			];
+			if (card.sub) children.push(E('div', { 'class': 'compass-card-sub' }, card.sub));
+			return E('div', { 'id': card.id, 'class': 'mode-status-card ' + card.cls }, children);
+		}));
+}
+
+function updateModeStatusCards(dm, apo, flo, vo, ppo) {
+	modeStatusData(dm, apo, flo, vo, ppo).forEach(function(card) {
+		var el = document.getElementById(card.id);
+		if (!el) return;
+		el.className = 'mode-status-card ' + card.cls;
+		var value = el.querySelector('.compass-card-value');
+		var sub = el.querySelector('.compass-card-sub');
+		if (value) { value.textContent = card.value; value.style.color = card.color; }
+		if (sub) sub.textContent = card.sub || '';
+	});
+}
+
 /* ── Main View ── */
 return view.extend({
 	load: function() {
-		return Promise.all([
-			callNpuStatus(),        // d[0]
-			callPpeEntries(),       // d[1]
-			callTokenInfo(),        // d[2]
-			callFrameEngine(),      // d[3]
-			callGetVlanOffload(),   // d[4]
-			callTxStats(),          // d[5]
-			callGetDeviceMode(),    // d[6]
-			callGetNpuBypass(),     // d[7]
-			callGetWanHealth(),     // d[8]
-			callGetJitterResult(),  // d[9]
-			callGetConflictAlerts(),// d[10]
-			callGetWifiStats(),     // d[11]
-			callGetBridgeStats(),   // d[12]
-			callGetFlowOffload(),   // d[13]
-			callGetPppoeOffload(),  // d[14]
-			callGetEthStats()       // d[15]
-		]);
+		return callGetOverview().then(function(overview) {
+			overview = overview || {};
+			return [
+				overview.status, overview.ppe, overview.token, overview.frame,
+				overview.vlan, overview.tx, overview.mode, overview.bypass,
+				overview.wan, overview.jitter, overview.alerts, overview.wifi,
+				overview.bridge, overview.flow, overview.pppoe, overview.apmode,
+				overview.eth
+			];
+		});
+
 	},
 
 	render: function(data) {
@@ -1416,8 +1540,8 @@ return view.extend({
 		var bypass=data[7]||{}, wan=data[8]||{};
 		var jitter=data[9]||{}, alertData=data[10]||{};
 		var wifi=data[11]||{}, bridge=data[12]||{};
-		var flo=data[13]||{}, ppo=data[14]||{};
-		var eth=data[15]||{};
+		var flo=data[13]||{}, ppo=data[14]||{}, apo=data[15]||{};
+		var eth=data[16]||{};
 		var memR = Array.isArray(st.memory_regions) ? st.memory_regions : [];
 		var mode = dm.mode || 'router';
 
@@ -1447,43 +1571,31 @@ return view.extend({
 				renderCompassCards(cs, bypass, jitter, wan, wifi, bridge, mode),
 				// Ethernet port gauges row
 				buildEthGaugeRow((eth && Array.isArray(eth.ports)) ? eth.ports : [], ppe),
-				renderModeBanner(dm),
-				E('div',{'style':'display:flex;align-items:center;justify-content:space-evenly;margin-top:10px;flex-wrap:wrap;width:100%'},[
-					E('label',{'style':'display:flex;align-items:center;gap:6px;font-size:13px'},[
-						E('span',{'id':'flow-offload-badge','class':'offload-badge '+(flo.enabled?'offload-on':'offload-off')},_('HW Flow Offload')),
-						renderFlowOffloadSelect(flo.enabled)
-					]),
-					E('label',{'style':'display:flex;align-items:center;gap:6px;font-size:13px'},[
-						E('span',{'id':'vlan-offload-badge','class':'offload-badge '+(vo.enabled?'offload-on':'offload-off')},_('VLAN Offload')),
-						renderVlanOffloadSelect(vo.enabled)
-					]),
-					E('label',{'style':'display:flex;align-items:center;gap:6px;font-size:13px'},[
-						E('span',{'id':'pppoe-offload-badge','class':'offload-badge '+(ppo.enabled?'offload-on':'offload-off')},_('PPPoE Offload')),
-						renderPppoeOffloadSelect(ppo.enabled)
-					])
-				]),
+				renderModeStatusCards(dm, apo, flo, vo, ppo),
+				renderOffloadControls(flo, vo, ppo),
 				E('div',{'style':'margin-top:12px'}, renderPpeTerminal(ppe))
 			]),
 		]);
 
 		poll.add(L.bind(function() {
-			return Promise.all([
-				callNpuStatus(), callPpeEntries(), callTokenInfo(), callFrameEngine(),
-				callGetVlanOffload(), callTxStats(),
-				callGetDeviceMode(), callGetNpuBypass(),
-				callGetWanHealth(), callGetJitterResult(), callGetConflictAlerts(),
-				callGetWifiStats(), callGetBridgeStats(),
-				callGetFlowOffload(), callGetPppoeOffload(),
-				callGetEthStats()
-			]).then(L.bind(function(d) {
+			return callGetOverview().then(function(overview) {
+				overview = overview || {};
+				return [
+					overview.status, overview.ppe, overview.token, overview.frame,
+					overview.vlan, overview.tx, overview.mode, overview.bypass,
+					overview.wan, overview.jitter, overview.alerts, overview.wifi,
+					overview.bridge, overview.flow, overview.pppoe, overview.apmode,
+					overview.eth
+				];
+			}).then(L.bind(function(d) {
 				injectCSS();
 				var st=d[0]||{}, ppe=d[1]||{}, ti=d[2]||{}, fe=d[3]||{};
 				var vo=d[4]||{}, txs=d[5]||{}, dm=d[6]||{};
 				var bypass=d[7]||{}, wan=d[8]||{};
 				var jitter=d[9]||{}, alertData=d[10]||{};
 				var wifi=d[11]||{}, bridge=d[12]||{};
-				var flo=d[13]||{}, ppo=d[14]||{};
-				var eth=d[15]||{};
+				var flo=d[13]||{}, ppo=d[14]||{}, apo=d[15]||{};
+				var eth=d[16]||{};
 				var mode = dm.mode || 'router';
 
 				// Compass update (tachometer embedded inside compass)
@@ -1504,6 +1616,9 @@ return view.extend({
 					updateWifiBandSVG(wb, wws, (getTxQueue(ti, wb) || { type: wFallback }).type, ppe);
 				}
 
+				// Mode and acceleration cards
+				updateModeStatusCards(dm, apo, flo, vo, ppo);
+
 				// Conflict alerts
 				var alertWrap = document.getElementById('conflict-alerts');
 				if (alertWrap) {
@@ -1512,10 +1627,16 @@ return view.extend({
 				}
 
 				// Offload selects + badges
-				function _setOffloadBadge(id, on) { var b=document.getElementById(id); if(b) b.className='offload-badge '+(on?'offload-on':'offload-off'); }
-				var vs=document.getElementById('vlan-offload-select'); if(vs&&!vs.matches(':focus')) vs.value=(vo.enabled?'1':'0'); _setOffloadBadge('vlan-offload-badge',vo.enabled);
-				var fls=document.getElementById('flow-offload-select'); if(fls&&!fls.matches(':focus')) fls.value=(flo.enabled?'1':'0'); _setOffloadBadge('flow-offload-badge',flo.enabled);
-				var pps=document.getElementById('pppoe-offload-select'); if(pps&&!pps.matches(':focus')) pps.value=(ppo.enabled?'1':'0'); _setOffloadBadge('pppoe-offload-badge',ppo.enabled);
+				function _updateOffload(selectId, badgeId, on) {
+					on = isEnabled(on);
+					var el = document.getElementById(selectId);
+					if (el && !el.matches(':focus')) el.checked = on;
+					var b = document.getElementById(badgeId);
+					if (b) { b.className = 'offload-badge ' + (on ? 'offload-on' : 'offload-off'); b.textContent = on ? _('Enabled') : _('Disabled'); }
+				}
+				_updateOffload('flow-offload-select', 'flow-offload-badge', flo.enabled);
+				_updateOffload('vlan-offload-select', 'vlan-offload-badge', vo.enabled);
+				_updateOffload('pppoe-offload-select', 'pppoe-offload-badge', ppo.enabled);
 
 				// Ethernet port gauges — compute per-port Mbps deltas from cumulative byte counters
 				var ethPorts = (eth && Array.isArray(eth.ports)) ? eth.ports : [];

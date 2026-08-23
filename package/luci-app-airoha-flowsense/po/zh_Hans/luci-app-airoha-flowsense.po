@@ -3,6 +3,18 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: zh_Hans\n"
 
+msgid "Work Mode"
+msgstr "工作模式"
+
+msgid "Detecting..."
+msgstr "检测中..."
+
+msgid "Click to disable"
+msgstr "点击禁用"
+
+msgid "Click to enable"
+msgstr "点击启用"
+
 msgid "Click to change ping target"
 msgstr "点击修改测试 IP"
 

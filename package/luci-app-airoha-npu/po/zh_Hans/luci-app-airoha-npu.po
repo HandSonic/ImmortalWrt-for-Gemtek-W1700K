@@ -10,6 +10,15 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+msgid "HW Flow Offload"
+msgstr "硬件流量加速"
+
+msgid "Click to disable"
+msgstr "点击禁用"
+
+msgid "Click to enable"
+msgstr "点击启用"
+
 msgid "AP Mode Acceleration"
 msgstr "AP 模式加速"
 
