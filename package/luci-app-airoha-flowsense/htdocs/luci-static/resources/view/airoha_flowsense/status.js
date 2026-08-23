@@ -276,6 +276,10 @@ function freqBarState(hw, min, max, pll, gov) {
 
 
 
+function isEnabled(value) {
+	return value === true || value === 1 || value === '1';
+}
+
 function renderOffloadBadge(enabled, id) {
 	enabled = isEnabled(enabled);
 	return E('span', {
