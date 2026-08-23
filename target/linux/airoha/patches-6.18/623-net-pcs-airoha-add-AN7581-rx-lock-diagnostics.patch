@@ -26,8 +26,8 @@ index ba1aa2050fc..dc9c06fec9c 100644
  	phylink_decode_usxgmii_word(state, lpa);
 +
 +	if (data->rxlock_workaround && !state->link)
-+		dev_info_ratelimited(priv->dev,
-+				     "port %d USXGMII AN down: stats0=%#010x stats2=%#010x\n",
++		dev_dbg_ratelimited(priv->dev,
++				    "port %d USXGMII AN down: stats0=%#010x stats2=%#010x\n",
 +				     index, lpa, an_done);
  }
  
