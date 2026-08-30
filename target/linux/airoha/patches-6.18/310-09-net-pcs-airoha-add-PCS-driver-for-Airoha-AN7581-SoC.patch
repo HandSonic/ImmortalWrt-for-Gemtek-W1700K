@@ -13,13 +13,13 @@ a PCS provider for fwnode usage.
 Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 ---
  drivers/net/pcs/Kconfig                    |    2 +
- drivers/net/pcs/Makefile                   |    2 +
+ drivers/net/pcs/Makefile                   |    1 +
  drivers/net/pcs/airoha/Kconfig             |   12 +
  drivers/net/pcs/airoha/Makefile            |    7 +
- drivers/net/pcs/airoha/pcs-airoha-common.c | 1313 ++++++++++++
+ drivers/net/pcs/airoha/pcs-airoha-common.c | 1307 ++++++++++++
  drivers/net/pcs/airoha/pcs-airoha.h        | 1309 ++++++++++++
  drivers/net/pcs/airoha/pcs-an7581.c        | 2093 ++++++++++++++++++++
- 7 files changed, 4738 insertions(+)
+ 7 files changed, 4731 insertions(+)
  create mode 100644 drivers/net/pcs/airoha/Kconfig
  create mode 100644 drivers/net/pcs/airoha/Makefile
  create mode 100644 drivers/net/pcs/airoha/pcs-airoha-common.c
@@ -69,7 +69,7 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 +endif
 --- /dev/null
 +++ b/drivers/net/pcs/airoha/pcs-airoha-common.c
-@@ -0,0 +1,1313 @@
+@@ -0,0 +1,1307 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Copyright (c) 2024 AIROHA Inc
@@ -979,12 +979,6 @@ Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
 +	regmap_update_bits(maps->pcs_mac, AIROHA_PCS_XFI_MAC_XFI_GIB_CFG,
 +			   AIROHA_PCS_XFI_IPG_NUM,
 +			   FIELD_PREP(AIROHA_PCS_XFI_IPG_NUM, 10));
-+
-+	/* Enable TX/RX flow control */
-+	regmap_set_bits(maps->pcs_mac, AIROHA_PCS_XFI_MAC_XFI_GIB_CFG,
-+			AIROHA_PCS_XFI_TX_FC_EN);
-+	regmap_set_bits(maps->pcs_mac, AIROHA_PCS_XFI_MAC_XFI_GIB_CFG,
-+			AIROHA_PCS_XFI_RX_FC_EN);
 +
 +	return 0;
 +}

@@ -11,7 +11,11 @@ Configure forced link modes consistently with the AN7581 SDK, including
 rate adaptation, SGMII speed selection, and 1000BASE-X Clause 37 restart
 handling.
 
-Assisted-by: Codex:GPT-5.6-sol
+For USXGMII, link_up receives the speed resolved by in-band negotiation.
+Always program that resolved speed so subsequent 1/2.5/5/10G changes update
+both the PCS mode and rate adaptation.  Keep the other interfaces gated to
+forced mode; in particular, do not treat 10GBASE-R as in-band USXGMII.
+
 Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
 --- a/drivers/net/pcs/airoha/pcs-airoha-common.c
 +++ b/drivers/net/pcs/airoha/pcs-airoha-common.c
@@ -498,7 +502,7 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
  	case PHY_INTERFACE_MODE_USXGMII:
  		regmap_set_bits(maps->usxgmii_pcs, AIROHA_PCS_USXGMII_PCS_AN_CONTROL_0,
  				AIROHA_PCS_USXGMII_AN_RESTART);
-@@ -764,122 +993,27 @@ static void airoha_pcs_link_up(struct ph
+@@ -764,122 +993,31 @@ static void airoha_pcs_link_up(struct ph
  				   FIELD_PREP(AIROHA_PCS_HSGMII_RATE_ADAPT_RX_AFIFO_RD_THR, 0x5));
  	}
  
@@ -506,7 +510,11 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
 -	    interface == PHY_INTERFACE_MODE_10GBASER) {
 -		u32 mode;
 -		u32 rate_adapt;
-+	if (neg_mode != PHYLINK_PCS_NEG_INBAND_ENABLED) {
++	/* USXGMII link_up carries the speed resolved by in-band AN.  Forced
++	 * interfaces retain their existing neg_mode gate.
++	 */
++	if (interface == PHY_INTERFACE_MODE_USXGMII ||
++	    neg_mode != PHYLINK_PCS_NEG_INBAND_ENABLED) {
 +		int ret = 0;
  
 -		switch (speed) {
@@ -636,7 +644,7 @@ Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
  	}
  
  	if (data->link_up)
-@@ -917,6 +1051,7 @@ static void airoha_pcs_pre_config(struct
+@@ -917,6 +1055,7 @@ static void airoha_pcs_pre_config(struct
  	struct airoha_pcs_maps *maps;
  
  	maps = &priv->maps[port->index];
