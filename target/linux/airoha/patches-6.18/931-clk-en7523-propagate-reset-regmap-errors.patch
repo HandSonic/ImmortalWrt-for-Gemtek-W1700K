@@ -1,0 +1,52 @@
+From: OpenAI Codex <codex@openai.com>
+Date: Sat, 29 Aug 2026 22:15:00 +0800
+Subject: [PATCH] clk: en7523: propagate reset regmap errors
+
+The reset controller currently reports success even when its regmap write
+fails, and reset status consumes an uninitialized value after a failed
+read.  Callers use these operations to establish terminal DMA fences, so
+false success can release memory while hardware is still active.
+
+Return the underlying regmap errors from both paths.
+
+Signed-off-by: OpenAI Codex <codex@openai.com>
+---
+ drivers/clk/clk-en7523.c | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+--- a/drivers/clk/clk-en7523.c
++++ b/drivers/clk/clk-en7523.c
+@@ -1038,10 +1038,8 @@ static int en7523_reset_update(struct reset_controller_dev *rcdev,
+ 	else
+ 		val |= assert ? BIT(id % RST_NR_PER_BANK) : 0;
+ 
+-	regmap_update_bits(rst_data->map, addr, BIT(id % RST_NR_PER_BANK),
+-			   val);
+-
+-	return 0;
++	return regmap_update_bits(rst_data->map, addr,
++				  BIT(id % RST_NR_PER_BANK), val);
+ }
+ 
+ static int en7523_reset_assert(struct reset_controller_dev *rcdev,
+@@ -1062,13 +1060,17 @@ static int en7523_reset_status(struct reset_controller_dev *rcdev,
+ 	struct en_rst_data *rst_data = container_of(rcdev, struct en_rst_data, rcdev);
+ 	u32 addr = rst_data->bank_ofs[id / RST_NR_PER_BANK];
+ 	bool inverted = false;
++	int err;
+ 	u32 val;
+ 
+ 	/* For PCIC reset logic is inverted, 0:assert 1:deassert*/
+ 	if (addr == REG_NP_SCU_PCIC)
+ 		inverted = true;
+ 
+-	regmap_read(rst_data->map, addr, &val);
++	err = regmap_read(rst_data->map, addr, &val);
++	if (err)
++		return err;
++
+ 	val &= BIT(id % RST_NR_PER_BANK);
+ 	return inverted ? !val : !!val;
+ }
+-- 
+2.51.0

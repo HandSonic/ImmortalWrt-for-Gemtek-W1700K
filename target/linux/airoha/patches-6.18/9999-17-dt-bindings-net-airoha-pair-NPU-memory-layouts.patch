@@ -1,0 +1,53 @@
+From: OpenAI Codex <codex@openai.com>
+Date: Sun, 30 Aug 2026 02:35:00 +0800
+Subject: [PATCH] dt-bindings: net: airoha: pair NPU memory layouts
+
+The independent memory-region and memory-region-names alternatives allow
+their item counts to be mixed. Pair the supported one-, two-, four- and
+six-item layouts so malformed device trees fail schema validation.
+
+Signed-off-by: OpenAI Codex <codex@openai.com>
+---
+ .../bindings/net/airoha,en7581-npu.yaml       | 30 +++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+--- a/Documentation/devicetree/bindings/net/airoha,en7581-npu.yaml
++++ b/Documentation/devicetree/bindings/net/airoha,en7581-npu.yaml
+@@ -110,6 +110,36 @@ properties:
+           - const: ba
+           - const: mbox
+ 
++oneOf:
++  - properties:
++      memory-region:
++        minItems: 1
++        maxItems: 1
++      memory-region-names:
++        minItems: 1
++        maxItems: 1
++  - properties:
++      memory-region:
++        minItems: 2
++        maxItems: 2
++      memory-region-names:
++        minItems: 2
++        maxItems: 2
++  - properties:
++      memory-region:
++        minItems: 4
++        maxItems: 4
++      memory-region-names:
++        minItems: 4
++        maxItems: 4
++  - properties:
++      memory-region:
++        minItems: 6
++        maxItems: 6
++      memory-region-names:
++        minItems: 6
++        maxItems: 6
++
+ required:
+   - compatible
+   - reg
+

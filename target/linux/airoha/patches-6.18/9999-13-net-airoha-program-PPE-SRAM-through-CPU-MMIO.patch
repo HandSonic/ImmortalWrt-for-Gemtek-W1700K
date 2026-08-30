@@ -1,0 +1,149 @@
+From 306b78f5035af4bd011753c5a6b12812515caa6c Mon Sep 17 00:00:00 2001
+From: Lorenzo Bianconi <lorenzo@kernel.org>
+Date: Fri, 17 Oct 2025 11:06:17 +0200
+Subject: [PATCH] net: airoha: program PPE SRAM through CPU MMIO
+
+Program SRAM PPE entries directly through the CPU instead of issuing two
+NPU mailbox commands for every bind or invalidation.  This keeps the
+complete publish operation under ppe_lock, bounds the atomic ACK poll to
+100 us, and removes the high-frequency mailbox path from NAPI context.
+
+Use the same helper to clear both PPE SRAM banks during setup and propagate
+the first failed entry instead of reporting success.  Preserve the local
+DRAM and statistics reset performed before the SRAM walk.
+
+The mailbox remains in use by sleepable NPU and WLAN control paths.
+Restore its upstream 100 ms timeout; the local one-second extension had no
+hardware justification and could busy-wait for a full second on a stalled
+command.
+
+This combines upstream commits 306b78f5035a ("net: airoha: ppe: Configure
+SRAM PPE entries via the cpu"), 620d7b91aadb ("net: airoha: ppe: Flush PPE
+SRAM table during PPE setup"), and d7d81b003013 ("net: airoha: Fix error
+handling in airoha_ppe_flush_sram_entries()"), adapted to retain the local
+full FOE/statistics reset.
+
+Reviewed-by: Simon Horman <horms@kernel.org>
+Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
+Signed-off-by: W1700K port <w1700k@localhost>
+---
+ drivers/net/ethernet/airoha/airoha_npu.c |  2 +-
+ drivers/net/ethernet/airoha/airoha_ppe.c | 55 +++++++++++++++++--------
+ 2 files changed, 40 insertions(+), 17 deletions(-)
+
+--- a/drivers/net/ethernet/airoha/airoha_npu.c
++++ b/drivers/net/ethernet/airoha/airoha_npu.c
+@@ -205,7 +205,7 @@ static int __airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
+ 	ret = regmap_read_poll_timeout_atomic(npu->regmap,
+ 					      REG_CR_MBQ0_CTRL(3) + offset,
+ 					      val, (val & MBOX_MSG_DONE),
+-					      100, 1000 * MSEC_PER_SEC);
++					      100, 100 * MSEC_PER_SEC);
+ 	if (!ret) {
+ 		dma_rmb();
+ 		if (FIELD_GET(MBOX_MSG_STATUS, val) != NPU_MBOX_SUCCESS)
+--- a/drivers/net/ethernet/airoha/airoha_ppe.c
++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
+@@ -965,6 +965,28 @@ static bool airoha_ppe_foe_compare_entry(struct airoha_flow_table_entry *e,
+ 	return !memcmp(&e->data.d, &hwe->d, len - sizeof(hwe->ib1));
+ }
+ 
++static int airoha_ppe_foe_commit_sram_entry(struct airoha_ppe *ppe, u32 hash)
++{
++	struct airoha_foe_entry *hwe = ppe->foe + hash * sizeof(*hwe);
++	bool ppe2 = hash >= PPE_SRAM_NUM_ENTRIES;
++	u32 *ptr = (u32 *)hwe, val;
++	int i;
++
++	for (i = 0; i < sizeof(*hwe) / sizeof(*ptr); i++)
++		airoha_fe_wr(ppe->eth, REG_PPE_RAM_ENTRY(ppe2, i), ptr[i]);
++
++	/* Publish the complete SRAM entry before requesting the HW commit. */
++	wmb();
++	airoha_fe_wr(ppe->eth, REG_PPE_RAM_CTRL(ppe2),
++		     FIELD_PREP(PPE_SRAM_CTRL_ENTRY_MASK, hash) |
++		     PPE_SRAM_CTRL_WR_MASK | PPE_SRAM_CTRL_REQ_MASK);
++
++	return read_poll_timeout_atomic(airoha_fe_rr, val,
++					val & PPE_SRAM_CTRL_ACK_MASK,
++					10, 100, false, ppe->eth,
++					REG_PPE_RAM_CTRL(ppe2));
++}
++
+ static int airoha_ppe_foe_commit_entry(struct airoha_ppe *ppe,
+ 				       struct airoha_foe_entry *e,
+ 				       u32 hash, bool rx_wlan)
+@@ -994,14 +1015,8 @@ static int airoha_ppe_foe_commit_entry(struct airoha_ppe *ppe,
+ 	if (!rx_wlan)
+ 		airoha_ppe_foe_flow_stats_update(ppe, npu, hwe, hash);
+ 
+-	if (hash < sram_num_entries) {
+-		dma_addr_t addr = ppe->foe_dma + hash * sizeof(*hwe);
+-		bool ppe2 = airoha_ppe_is_enabled(eth, 1) &&
+-			    hash >= PPE_SRAM_NUM_ENTRIES;
+-
+-		err = npu->ops.ppe_foe_commit_entry(npu, addr, sizeof(*hwe),
+-						    hash, ppe2);
+-	}
++	if (hash < sram_num_entries)
++		err = airoha_ppe_foe_commit_sram_entry(ppe, hash);
+ unlock:
+ 	rcu_read_unlock();
+ 
+@@ -2298,12 +2313,12 @@ static int airoha_ppe_flow_offload_cmd(struct airoha_eth *eth,
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static int airoha_ppe_flush_sram_entries(struct airoha_ppe *ppe,
+-					 struct airoha_npu *npu)
++static int airoha_ppe_flush_sram_entries(struct airoha_ppe *ppe)
+ {
+ 	u32 ppe_num_entries = airoha_ppe_get_total_num_entries(ppe);
+ 	u32 sram_num_entries = airoha_ppe_get_total_sram_num_entries(ppe);
+ 	struct airoha_foe_entry *hwe = ppe->foe;
++	int i;
+ 
+ 	memset(hwe, 0, ppe_num_entries * sizeof(*hwe));
+ 	if (ppe->foe_stats) {
+@@ -2315,8 +2330,15 @@ static int airoha_ppe_flush_sram_entries(struct airoha_ppe *ppe,
+ 	}
+ 	dma_wmb();
+ 
+-	return npu->ops.ppe_flush_sram_entries(npu, ppe->foe_dma,
+-					       sram_num_entries);
++	for (i = 0; i < sram_num_entries; i++) {
++		int err;
++
++		err = airoha_ppe_foe_commit_sram_entry(ppe, i);
++		if (err)
++			return err;
++	}
++
++	return 0;
+ }
+ 
+ static int airoha_ppe_set_bind_rate(const char *val,
+@@ -2412,10 +2434,6 @@ static int airoha_ppe_offload_setup(struct airoha_eth *eth)
+ 	}
+ 
+ 	airoha_ppe_hw_init(ppe);
+-	err = airoha_ppe_flush_sram_entries(ppe, npu);
+-	if (err)
+-		goto error_npu_put;
+-
+ 	airoha_ppe_foe_flow_stats_reset(ppe, npu);
+ 
+ 	rcu_assign_pointer(eth->npu, npu);
+@@ -2710,6 +2728,10 @@ int airoha_ppe_init(struct airoha_eth *eth)
+ 	if (!ppe->soe_meta)
+ 		return -ENOMEM;
+ 
++	err = airoha_ppe_flush_sram_entries(ppe);
++	if (err)
++		return err;
++
+ 	err = rhashtable_init(&eth->flow_table, &airoha_flow_table_params);
+ 	if (err)
+ 		return err;
+-- 
+2.51.0
