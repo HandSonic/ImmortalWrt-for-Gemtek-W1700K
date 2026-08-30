@@ -3,7 +3,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_VERSION:=1.1.3
-PKG_RELEASE:=6
+PKG_RELEASE:=7
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=Airoha AN7581 Maintainer
 TITLE:=LuCI Airoha AN7581 FlowSense
