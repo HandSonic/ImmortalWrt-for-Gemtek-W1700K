@@ -1,0 +1,48 @@
+From e17cb78d2f03ba92bc6c4ef9ecbd6c0f39d3f19c Mon Sep 17 00:00:00 2001
+From: Yanghan Ye <yyh94306@gmail.com>
+Date: Sat, 29 Aug 2026 22:18:23 +0800
+Subject: [PATCH] wifi: mt76: quiesce work during DMA quarantine
+
+Terminal DMA quarantine intentionally leaves the mt76 object alive.
+Cancel every remaining driver work item, scan, ROC, and per-PHY watchdog
+before PCI devres starts releasing non-DMA consumer resources.
+
+Keep MCU and PHY reset state asserted so no new work is admitted while
+quarantined DMA mappings remain valid until reboot.
+
+Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
+---
+ mt7996/init.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/mt7996/init.c b/mt7996/init.c
+index 35700e1..22f69d5 100644
+--- a/mt7996/init.c
++++ b/mt7996/init.c
+@@ -1900,12 +1900,23 @@ error:
+ 
+ void mt7996_quarantine_device(struct mt7996_dev *dev)
+ {
++	struct mt7996_phy *phy;
++
+ 	dev->recovery.hw_full_reset = true;
++	set_bit(MT76_MCU_RESET, &dev->mphy.state);
++	wake_up(&dev->mt76.mcu.wait);
+ 	cancel_work_sync(&dev->dump_work);
+ 	cancel_work_sync(&dev->reset_work);
++	cancel_work_sync(&dev->init_work);
+ 	dev->recovery.hw_full_reset = true;
+ 	mt7996_wed_rro_work_stop(dev);
+ 	cancel_work_sync(&dev->rc_work);
++	mt76_abort_scan(&dev->mt76);
++	mt7996_for_each_phy(dev, phy) {
++		set_bit(MT76_RESET, &phy->mt76->state);
++		mt76_abort_roc(phy->mt76);
++		cancel_delayed_work_sync(&phy->mt76->mac_work);
++	}
+ 
+ 	if (test_bit(MT76_STATE_REGISTERED, &dev->mphy.state))
+ 		ieee80211_stop_queues(mt76_hw(dev));
+-- 
+2.52.0.windows.1
+

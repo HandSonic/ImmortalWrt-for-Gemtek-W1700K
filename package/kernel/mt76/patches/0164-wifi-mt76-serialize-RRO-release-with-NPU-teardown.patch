@@ -1,0 +1,248 @@
+From 9344d2aa207595c826a32fbdf1421f2083ae8983 Mon Sep 17 00:00:00 2001
+From: Yanghan Ye <yyh94306@gmail.com>
+Date: Sat, 29 Aug 2026 21:34:33 +0800
+Subject: [PATCH] wifi: mt76: serialize RRO release with NPU teardown
+
+Propagate failures while publishing the RRO address arrays. If an NPU
+session-release command still fails after the bounded mailbox retry,
+keep the WLAN session allocated instead of making an address that the
+NPU may still reference reusable.
+
+Add a lock-protected stopping state around RRO delete work. Teardown and
+shutdown publish it before canceling work, while the MCU producer checks
+and queues under the same lock. Only successful recovery clears it.
+
+Signed-off-by: Yanghan Ye <yyh94306@gmail.com>
+---
+ mt7996/init.c   | 95 ++++++++++++++++++++++++++++++++++++++++---------
+ mt7996/mcu.c    |  9 +++--
+ mt7996/mt7996.h |  3 ++
+ 3 files changed, 89 insertions(+), 18 deletions(-)
+
+diff --git a/mt7996/init.c b/mt7996/init.c
+index 8ace8c6..67e4602 100644
+--- a/mt7996/init.c
++++ b/mt7996/init.c
+@@ -981,7 +981,7 @@ static int mt7996_wed_rro_init(struct mt7996_dev *dev)
+ 	u32 val = FIELD_PREP(WED_RRO_ADDR_SIGNATURE_MASK, 0xff);
+ 	struct mt7996_wed_rro_addr *addr;
+ 	void *ptr;
+-	int i;
++	int i, err;
+ 
+ 	if (!mt7996_has_hwrro(dev))
+ 		return 0;
+@@ -1020,10 +1020,13 @@ static int mt7996_wed_rro_init(struct mt7996_dev *dev)
+ 		}
+ 
+ 		if (is_mt7996(&dev->mt76) &&
+-		    mt76_npu_device_active(&dev->mt76))
+-			mt76_npu_send_txrx_addr(&dev->mt76, 0, i,
+-					dev->wed_rro.addr_elem[i].phy_addr,
+-					0, 0);
++		    mt76_npu_device_active(&dev->mt76)) {
++			err = mt76_npu_send_txrx_addr(&dev->mt76, 0, i,
++						      dev->wed_rro.addr_elem[i].phy_addr,
++						      0, 0);
++			if (err)
++				return err;
++		}
+ 
+ #ifdef CONFIG_NET_MEDIATEK_SOC_WED
+ 		if (mtk_wed_device_active(&dev->mt76.mmio.wed) &&
+@@ -1085,9 +1088,13 @@ static int mt7996_wed_rro_init(struct mt7996_dev *dev)
+ 		addr++;
+ 	}
+ 
+-	if (is_mt7996(&dev->mt76) && mt76_npu_device_active(&dev->mt76))
+-		mt76_npu_send_txrx_addr(&dev->mt76, 1, 0,
+-					dev->wed_rro.session.phy_addr, 0, 0);
++	if (is_mt7996(&dev->mt76) && mt76_npu_device_active(&dev->mt76)) {
++		err = mt76_npu_send_txrx_addr(&dev->mt76, 1, 0,
++					      dev->wed_rro.session.phy_addr,
++					      0, 0);
++		if (err)
++			return err;
++	}
+ 
+ 	mt7996_rro_hw_init(dev);
+ 
+@@ -1164,21 +1171,36 @@ static void mt7996_wed_rro_work(struct work_struct *work)
+ 						wed_rro.work);
+ 
+ 	spin_lock_bh(&dev->wed_rro.lock);
++	if (dev->wed_rro.stopping) {
++		spin_unlock_bh(&dev->wed_rro.lock);
++		return;
++	}
+ 	list_splice_init(&dev->wed_rro.poll_list, &list);
+ 	spin_unlock_bh(&dev->wed_rro.lock);
+ 
+ 	while (!list_empty(&list)) {
+ 		struct mt7996_wed_rro_session_id *e;
+-		int i;
++		int i, err;
+ 
+ 		e = list_first_entry(&list, struct mt7996_wed_rro_session_id,
+ 				     list);
+ 		list_del_init(&e->list);
+ 
+ 		if (mt76_npu_device_active(&dev->mt76)) {
+-			if (is_mt7996(&dev->mt76))
+-				mt76_npu_send_txrx_addr(&dev->mt76, 3, e->id,
+-							0, 0, 0);
++			if (is_mt7996(&dev->mt76)) {
++				err = mt76_npu_send_txrx_addr(&dev->mt76, 3,
++							      e->id, 0, 0, 0);
++				if (err) {
++					dev_err_ratelimited(dev->mt76.dev,
++							    "failed to release NPU RRO session %u: %d; "
++							    "keeping it quarantined\n",
++							    e->id, err);
++					/* The NPU may still reference this session. Do not
++					 * tell the WLAN firmware that it can be reused.
++					 */
++					goto out;
++				}
++			}
+ 			goto reset_session;
+ 		}
+ 
+@@ -1203,12 +1225,34 @@ reset:
+ 			elem->data |= cpu_to_le32(val);
+ 		}
+ reset_session:
+-		mt7996_mcu_wed_rro_reset_sessions(dev, e->id);
++		err = mt7996_mcu_wed_rro_reset_sessions(dev, e->id);
++		if (err)
++			dev_warn_ratelimited(dev->mt76.dev,
++					     "failed to reset RRO session %u: %d\n",
++					     e->id, err);
+ out:
+ 		kfree(e);
+ 	}
+ }
+ 
++void mt7996_wed_rro_work_stop(struct mt7996_dev *dev)
++{
++	spin_lock_bh(&dev->wed_rro.lock);
++	dev->wed_rro.stopping = true;
++	spin_unlock_bh(&dev->wed_rro.lock);
++
++	cancel_work_sync(&dev->wed_rro.work);
++}
++
++void mt7996_wed_rro_work_start(struct mt7996_dev *dev)
++{
++	spin_lock_bh(&dev->wed_rro.lock);
++	dev->wed_rro.stopping = false;
++	if (!list_empty(&dev->wed_rro.poll_list))
++		ieee80211_queue_work(mt76_hw(dev), &dev->wed_rro.work);
++	spin_unlock_bh(&dev->wed_rro.lock);
++}
++
+ static int mt7996_variant_type_init(struct mt7996_dev *dev)
+ {
+ 	u32 val = mt76_rr(dev, MT_PAD_GPIO);
+@@ -1297,6 +1341,7 @@ static int mt7996_init_hardware(struct mt7996_dev *dev)
+ 	INIT_WORK(&dev->wed_rro.work, mt7996_wed_rro_work);
+ 	INIT_LIST_HEAD(&dev->wed_rro.poll_list);
+ 	spin_lock_init(&dev->wed_rro.lock);
++	dev->wed_rro.stopping = false;
+ 
+ 	ret = mt7996_variant_type_init(dev);
+ 	if (ret)
+@@ -1833,13 +1878,19 @@ void mt7996_unregister_device(struct mt7996_dev *dev)
+ {
+ 	int err;
+ 
++	dev->recovery.hw_full_reset = true;
+ 	cancel_work_sync(&dev->dump_work);
+-	cancel_work_sync(&dev->wed_rro.work);
+ 	cancel_work_sync(&dev->reset_work);
++	dev->recovery.hw_full_reset = true;
++	mt7996_wed_rro_work_stop(dev);
+ 	cancel_work_sync(&dev->rc_work);
+ 	err = mt7996_npu_hw_stop_teardown(dev);
+-	if (err)
+-		dev_warn(dev->mt76.dev, "failed to stop NPU: %d\n", err);
++	if (err) {
++		dev_crit(dev->mt76.dev,
++			 "failed to fence NPU DMA; refusing to release resources: %d\n",
++			 err);
++		return;
++	}
+ 	mt7996_unregister_phy(mt7996_phy3(dev));
+ 	mt7996_unregister_phy(mt7996_phy2(dev));
+ 	mt7996_unregister_thermal(&dev->phy);
+@@ -1860,12 +1911,24 @@ void mt7996_unregister_device(struct mt7996_dev *dev)
+ 
+ void mt7996_shutdown_device(struct mt7996_dev *dev)
+ {
++	int err;
++
++	dev->recovery.hw_full_reset = true;
++	cancel_work_sync(&dev->dump_work);
++	cancel_work_sync(&dev->reset_work);
++	dev->recovery.hw_full_reset = true;
++	mt7996_wed_rro_work_stop(dev);
+ 	if (mtk_wed_device_active(&dev->mt76.mmio.wed_hif2))
+ 		mtk_wed_device_stop(&dev->mt76.mmio.wed_hif2);
+ 
+ 	if (mtk_wed_device_active(&dev->mt76.mmio.wed))
+ 		mtk_wed_device_stop(&dev->mt76.mmio.wed);
+ 
++	err = mt7996_npu_hw_stop_teardown(dev);
++	if (err)
++		dev_emerg(dev->mt76.dev,
++			  "failed to fence NPU during shutdown: %d\n", err);
++
+ 	mt76_npu_disable_irqs(&dev->mt76);
+ 	mt7996_irq_disable(dev, ~0);
+ 	mt7996_dma_disable(dev, true);
+diff --git a/mt7996/mcu.c b/mt7996/mcu.c
+index 9fbd72f..23961bf 100644
+--- a/mt7996/mcu.c
++++ b/mt7996/mcu.c
+@@ -1111,10 +1111,15 @@ mt7996_mcu_wed_rro_event(struct mt7996_dev *dev, struct sk_buff *skb)
+ 			session->id = le16_to_cpu(e->session_id);
+ 
+ 			spin_lock_bh(&dev->wed_rro.lock);
++			if (dev->wed_rro.stopping) {
++				spin_unlock_bh(&dev->wed_rro.lock);
++				kfree(session);
++				skb_pull(skb, sizeof(*e));
++				continue;
++			}
+ 			list_add_tail(&session->list, &dev->wed_rro.poll_list);
+-			spin_unlock_bh(&dev->wed_rro.lock);
+-
+ 			ieee80211_queue_work(mt76_hw(dev), &dev->wed_rro.work);
++			spin_unlock_bh(&dev->wed_rro.lock);
+ 			skb_pull(skb, sizeof(*e));
+ 		}
+ 		break;
+diff --git a/mt7996/mt7996.h b/mt7996/mt7996.h
+index ba6d2a0..57b6b4f 100644
+--- a/mt7996/mt7996.h
++++ b/mt7996/mt7996.h
+@@ -547,6 +547,7 @@ struct mt7996_dev {
+ 		struct work_struct work;
+ 		struct list_head poll_list;
+ 		spinlock_t lock;
++		bool stopping;
+ 
+ 		struct list_head page_cache;
+ 		struct list_head page_map[MT7996_RRO_MSDU_PG_HASH_SIZE];
+@@ -736,6 +737,8 @@ u64 __mt7996_get_tsf(struct ieee80211_hw *hw, struct mt7996_vif_link *link);
+ int mt7996_register_device(struct mt7996_dev *dev);
+ void mt7996_unregister_device(struct mt7996_dev *dev);
+ void mt7996_shutdown_device(struct mt7996_dev *dev);
++void mt7996_wed_rro_work_stop(struct mt7996_dev *dev);
++void mt7996_wed_rro_work_start(struct mt7996_dev *dev);
+ int mt7996_vif_link_add(struct mt76_phy *mphy, struct ieee80211_vif *vif,
+ 			struct ieee80211_bss_conf *link_conf,
+ 			struct mt76_vif_link *mlink);
+-- 
+2.52.0.windows.1
+
