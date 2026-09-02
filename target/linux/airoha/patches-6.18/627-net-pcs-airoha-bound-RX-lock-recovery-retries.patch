@@ -1,24 +1,28 @@
-From 7207292808611e34c3a1bed2deed4278564cfe88 Mon Sep 17 00:00:00 2001
+From 169c4a7423efae5e424b1bd13093a526506353f4 Mon Sep 17 00:00:00 2001
 From: OpenAI Codex <codex@openai.com>
 Date: Sat, 29 Aug 2026 22:34:10 +0800
-Subject: [PATCH] net: pcs: airoha: bound RX-lock recovery retries
+Subject: [PATCH] net: pcs: airoha: rate-limit RX-lock recovery retries
 
 Do not use the partner AN link bit as proof of local RX readiness.
 
 Gate CDR recovery across the complete PCS configuration transaction.
-
 Serialize explicit AN restart requests with CDR reset operations.
 
 Require one second of signal loss before starting a new signal epoch.
 
-Allow two resets one second apart, then apply a 30-second cooldown.
+Allow two resets one second apart in each recovery window, then apply a
+30-second cooldown. Re-observe the receiver for one second before opening
+another recovery window so a boundary transient cannot trigger an immediate
+CDR reset.
+
+Report observed signal loss as link down for the current poll.
 
 Signed-off-by: OpenAI Codex <codex@openai.com>
 ---
- drivers/net/pcs/airoha/pcs-airoha-common.c | 161 ++++++++++++++++--
+ drivers/net/pcs/airoha/pcs-airoha-common.c | 161 +++++++++++++++--
  drivers/net/pcs/airoha/pcs-airoha.h        |  55 +++++-
- drivers/net/pcs/airoha/pcs-an7581.c        | 185 ++++++++++++++++++---
- 3 files changed, 367 insertions(+), 34 deletions(-)
+ drivers/net/pcs/airoha/pcs-an7581.c        | 190 ++++++++++++++++++---
+ 3 files changed, 372 insertions(+), 34 deletions(-)
 
 diff --git a/drivers/net/pcs/airoha/pcs-airoha-common.c b/drivers/net/pcs/airoha/pcs-airoha-common.c
 index 9522bb8..2e0eb6e 100644
@@ -370,7 +374,7 @@ index f9eb7a1..22783da 100644
  	return 0;
  }
 diff --git a/drivers/net/pcs/airoha/pcs-an7581.c b/drivers/net/pcs/airoha/pcs-an7581.c
-index 2fe376a..a41d615 100644
+index 2fe376a..dad7515 100644
 --- a/drivers/net/pcs/airoha/pcs-an7581.c
 +++ b/drivers/net/pcs/airoha/pcs-an7581.c
 @@ -3,6 +3,7 @@
@@ -411,7 +415,7 @@ index 2fe376a..a41d615 100644
  		dev_info_ratelimited(priv->dev,
  				     "port %d USXGMII RX: pcs=%#010x base-r=%#010x an=%#010x an-done=%#010x sigdet=%u freqdet=%#010x rst=%#010x action=%s resets=%u\n",
  				     index, pcs_status, base_r, an_status, an_done, signal,
-@@ -2089,37 +2095,176 @@ static void an7581_pcs_report_rxlock(struct airoha_pcs_priv *priv, int index,
+@@ -2089,37 +2095,181 @@ static void an7581_pcs_report_rxlock(struct airoha_pcs_priv *priv, int index,
  				    freqdet, rst, action, priv->rxlock_reset_count[index]);
  }
  
@@ -568,7 +572,12 @@ index 2fe376a..a41d615 100644
 +		}
 +
 +		recovery->attempts = 0;
-+		goto reset;
++		recovery->state = AIROHA_PCS_RXLOCK_OBSERVE;
++		recovery->deadline =
++			jiffies + AN7581_PCS_RXLOCK_RETRY_DELAY;
++		action = "reobserve";
++		ret = -EAGAIN;
++		break;
 +	default:
 +		recovery->state = AIROHA_PCS_RXLOCK_EXHAUSTED;
 +		recovery->attempts = AN7581_PCS_RXLOCK_MAX_ATTEMPTS;
