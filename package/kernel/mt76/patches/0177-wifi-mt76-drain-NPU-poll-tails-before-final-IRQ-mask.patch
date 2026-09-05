@@ -1,0 +1,42 @@
+From: OpenAI Codex <codex@openai.com>
+Subject: [PATCH] wifi: mt76: drain NPU poll tails before final IRQ mask
+
+napi_disable() waits for NAPI ownership to be released, not for the poll
+callback to return. An NPU RX poll can therefore complete NAPI, race the
+second interrupt mask in mt7996_npu_pre_stop(), and subsequently re-enable
+its IRQ from rx_poll_complete(). The NAPI state mutex does not serialize
+this callback tail.
+
+Wait for the old network read-side sections after all NAPI instances have
+been disabled and before the final interrupt mask. The NPU poll holds RCU
+across rx_poll_complete(), and npu_stop_mutex prevents post_reset from
+restoring the data NAPI instances during this wait.
+
+The common pre-stop also covers terminal quiesce before RX queue cleanup,
+so no extra grace period is needed for each queue. The wait is limited to
+recovery and teardown, without changing packet processing or adding a
+hot-path lock.
+
+Signed-off-by: OpenAI Codex <codex@openai.com>
+---
+ mt7996/init.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/mt7996/init.c b/mt7996/init.c
+index 5324ff9..21d0797 100644
+--- a/mt7996/init.c
++++ b/mt7996/init.c
+@@ -2042,7 +2042,10 @@ void mt7996_npu_pre_stop(struct mt7996_dev *dev)
+ 		mt76_napi_disable(&dev->mt76, MT76_NAPI_TX,
+ 				  &dev->mt76.tx_napi);
+ 
+-	/* A poll completing during quiesce can re-enable its IRQ. */
++	/* A poll can re-enable its IRQ after releasing NAPI ownership.
++	 * Drain its RCU/BH read-side section before the final mask.
++	 */
++	synchronize_net();
+ 	mt76_npu_disable_irqs(&dev->mt76);
+ 	mt7996_irq_disable(dev, ~0);
+ 	WRITE_ONCE(dev->mt76.mmio.irqmask, irqmask);
+-- 
+2.52.0.windows.1
