@@ -1,4 +1,4 @@
-From 169c4a7423efae5e424b1bd13093a526506353f4 Mon Sep 17 00:00:00 2001
+From bbb06df3d5894b83faf231bc96bbe4acec48c49d Mon Sep 17 00:00:00 2001
 From: OpenAI Codex <codex@openai.com>
 Date: Sat, 29 Aug 2026 22:34:10 +0800
 Subject: [PATCH] net: pcs: airoha: rate-limit RX-lock recovery retries
@@ -14,6 +14,10 @@ Allow two resets one second apart in each recovery window, then apply a
 30-second cooldown. Re-observe the receiver for one second before opening
 another recovery window so a boundary transient cannot trigger an immediate
 CDR reset.
+
+Preserve an active cooldown when the local receiver briefly locks without
+establishing the partner link. Entering AN_WAIT would discard its deadline
+and start another full cooldown on the next receiver lock loss.
 
 Report observed signal loss as link down for the current poll.
 
@@ -374,7 +378,7 @@ index f9eb7a1..22783da 100644
  	return 0;
  }
 diff --git a/drivers/net/pcs/airoha/pcs-an7581.c b/drivers/net/pcs/airoha/pcs-an7581.c
-index 2fe376a..dad7515 100644
+index 2fe376a..ef34eae 100644
 --- a/drivers/net/pcs/airoha/pcs-an7581.c
 +++ b/drivers/net/pcs/airoha/pcs-an7581.c
 @@ -3,6 +3,7 @@
@@ -517,7 +521,7 @@ index 2fe376a..dad7515 100644
 +			airoha_pcs_rxlock_rearm(recovery);
 +			ret = 0;
 +			goto out;
-+		} else {
++		} else if (recovery->state != AIROHA_PCS_RXLOCK_EXHAUSTED) {
 +			recovery->state = AIROHA_PCS_RXLOCK_AN_WAIT;
 +			recovery->deadline = 0;
 +		}
