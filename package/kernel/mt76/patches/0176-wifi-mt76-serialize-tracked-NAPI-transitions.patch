@@ -1,0 +1,85 @@
+From a8797ec4c52ed3b52d01949213a88811fae97aa1 Mon Sep 17 00:00:00 2001
+From: OpenAI Codex <codex@openai.com>
+Date: Sat, 5 Sep 2026 17:00:39 +0800
+Subject: [PATCH] wifi: mt76: serialize tracked NAPI transitions
+
+MCU bootstrap during reset can race terminal pre-stop. Atomic updates to
+napi_enabled do not serialize the subsequent napi_enable/napi_disable
+calls. A disable can observe the new bit and run before the corresponding
+enable, or an enable can overtake a pending disable. This violates NAPI
+pairing and can hang or trigger a BUG during recovery or teardown.
+
+Serialize the tracked bitmap check and the complete NAPI operation with
+a mutex initialized before any NAPI setup. Leave untracked users on their
+existing path. The mutex is used only for NAPI lifecycle transitions, not
+for packet polling or IRQ processing.
+
+Signed-off-by: OpenAI Codex <codex@openai.com>
+---
+ mac80211.c |  1 +
+ mt76.h     | 22 ++++++++++++++++------
+ 2 files changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/mac80211.c b/mac80211.c
+index f67f215..49abc38 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -697,6 +697,7 @@ mt76_alloc_device(struct device *pdev, unsigned int size,
+ 	spin_lock_init(&dev->wed_lock);
+ 	mutex_init(&dev->mutex);
+ 	mutex_init(&dev->dma_alloc_mutex);
++	mutex_init(&dev->napi_state_mutex);
+ 	INIT_LIST_HEAD(&dev->dma_allocations);
+ 	init_waitqueue_head(&dev->tx_wait);
+ 
+diff --git a/mt76.h b/mt76.h
+index 35b85ff..3e54e79 100644
+--- a/mt76.h
++++ b/mt76.h
+@@ -970,6 +970,8 @@ struct mt76_dev {
+ 	spinlock_t rx_lock;
+ 	struct napi_struct napi[__MT_RXQ_MAX];
+ 	unsigned long napi_registered;
++	/* Serializes tracked NAPI state with the actual enable/disable. */
++	struct mutex napi_state_mutex;
+ 	unsigned long napi_enabled;
+ 	bool napi_state_tracked;
+ 	struct sk_buff_head rx_skb[__MT_RXQ_MAX];
+@@ -1802,21 +1804,29 @@ static inline bool mt76_npu_device_active(struct mt76_dev *dev)
+ static inline void mt76_napi_enable(struct mt76_dev *dev, int id,
+ 				    struct napi_struct *napi)
+ {
+-	if (dev->napi_state_tracked &&
+-	    test_and_set_bit(id, &dev->napi_enabled))
++	if (!dev->napi_state_tracked) {
++		napi_enable(napi);
+ 		return;
++	}
+ 
+-	napi_enable(napi);
++	mutex_lock(&dev->napi_state_mutex);
++	if (!test_and_set_bit(id, &dev->napi_enabled))
++		napi_enable(napi);
++	mutex_unlock(&dev->napi_state_mutex);
+ }
+ 
+ static inline void mt76_napi_disable(struct mt76_dev *dev, int id,
+ 				     struct napi_struct *napi)
+ {
+-	if (dev->napi_state_tracked &&
+-	    !test_and_clear_bit(id, &dev->napi_enabled))
++	if (!dev->napi_state_tracked) {
++		napi_disable(napi);
+ 		return;
++	}
+ 
+-	napi_disable(napi);
++	mutex_lock(&dev->napi_state_mutex);
++	if (test_and_clear_bit(id, &dev->napi_enabled))
++		napi_disable(napi);
++	mutex_unlock(&dev->napi_state_mutex);
+ }
+ 
+ static inline bool mt76_ppe_device_active(struct mt76_dev *dev)
+-- 
+2.52.0.windows.1

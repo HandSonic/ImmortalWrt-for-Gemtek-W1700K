@@ -1,0 +1,39 @@
+From e9ef3804ad4d0c05f50608a64f34fc862a556f8e Mon Sep 17 00:00:00 2001
+From: OpenAI Codex <codex@openai.com>
+Date: Sat, 5 Sep 2026 17:00:04 +0800
+Subject: [PATCH] wifi: mt76: restore MCU replies before L1 beacon updates
+
+The L1 pre-stop path disables the IRQ tasklet and all NAPI instances.
+Polling MT_MCU_CMD completes the SER handshake, but it does not receive
+the replies to synchronous beacon update commands. Sending those commands
+before npu_post_reset therefore causes a timeout and another full reset.
+
+Restore the saved MCU RX queues and bootstrap the IRQ tasklet before
+updating beacons. Reuse the full-reset helper, including its terminal
+check, and retain the existing failure path if bootstrap is refused.
+Leave data NAPI and the TX worker stopped until normal post-reset restore.
+
+Signed-off-by: OpenAI Codex <codex@openai.com>
+---
+ mt7996/mac.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/mt7996/mac.c b/mt7996/mac.c
+index 0067ef7..688682d 100644
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -2633,7 +2633,11 @@ void mt7996_mac_reset_work(struct work_struct *work)
+ 	if (err)
+ 		goto fail_unlock;
+ 
+-	clear_bit(MT76_MCU_RESET, &dev->mphy.state);
++	/* Beacon updates wait for MCU replies, not the polled SER states. */
++	err = mt7996_mac_restart_mcu_enable(dev);
++	if (err)
++		goto fail_unlock;
++
+ 	mt7996_for_each_phy(dev, phy)
+ 		clear_bit(MT76_RESET, &phy->mt76->state);
+ 
+-- 
+2.52.0.windows.1
