@@ -150,12 +150,13 @@ define Device/gemtek_xr1710g-ubi
 		    kmod-mt7996-firmware kmod-phy-realtek \
 		    kmod-airoha-net-debug rtl826x-firmware \
 		    luci \
-		    luci-app-firewall \
+		    luci-app-firewall luci-app-mlo \
 		    luci-app-package-manager \
 		    luci-i18n-airoha-npu-zh-cn \
 		    luci-i18n-base-zh-cn \
 		    luci-i18n-firewall-zh-cn \
 		    luci-i18n-glass-zh-cn \
+		    luci-i18n-mlo-zh-cn \
 		    luci-i18n-package-manager-zh-cn \
 		    luci-mod-admin-full \
 		    luci-proto-ppp luci-theme-bootstrap luci-theme-glass \
