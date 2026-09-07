@@ -89,6 +89,8 @@ jobs:
           VERSION_CODE='${{ steps.version.outputs.version_code }}' \
           bash scripts/set-build-version.sh .config
           make defconfig
+          # Keep image filenames concise: version number only, no revision/extra suffix
+          sed -i -e 's/^CONFIG_VERSION_CODE_FILENAMES=y$/# CONFIG_VERSION_CODE_FILENAMES is not set/' .config
           grep -E 'CONFIG_(IMAGEOPT|EXTRA_IMAGE_NAME|VERSIONOPT|VERSION_DIST|VERSION_NUMBER|VERSION_CODE)=' .config
 
       - name: Download sources
