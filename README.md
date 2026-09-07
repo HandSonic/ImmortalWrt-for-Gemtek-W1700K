@@ -82,7 +82,6 @@
 | `luci-app-upnp` | UPnP 自动端口转发 |
 | `luci-app-firewall` | 防火墙（firewall4/nftables） |
 | `luci-app-arpbind` | IP/MAC 绑定 |
-| `luci-app-mlo` | MLO（Wi-Fi 7 多链路操作） |
 | `luci-app-msd_lite` | MSD Lite 组播播放 |
 
 #### 系统与自动化
