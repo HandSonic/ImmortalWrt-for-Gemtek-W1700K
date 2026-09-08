@@ -629,6 +629,9 @@ function renderConflictAlerts(alertData) {
 /* ── HW Buffer Health (replaces SQM — NPU traffic bypasses qdisc entirely) ── */
 function hwBufferState(fe, ppe, mode) {
 	fe = fe || {}; ppe = ppe || {}; mode = mode || 'router';
+	var available = fe.available !== false && !fe.error && Array.isArray(fe.pse_ports) &&
+		fe.cdm1 && typeof fe.cdm1.rx_hwf_drop === 'number' &&
+		fe.cdm2 && typeof fe.cdm2.rx_hwf_drop === 'number';
 
 	// PSE port drops: cumulative across all internal ports (0-9).
 	// These include CDM/PPE internal paths that drop normally — not a reliable
@@ -645,11 +648,13 @@ function hwBufferState(fe, ppe, mode) {
 	// Delta since last poll — null on first call (baseline only, no alarm)
 	var pseDelta    = (_prevPseDrops    !== null && pseDrops    >= _prevPseDrops)    ? (pseDrops    - _prevPseDrops)    : 0;
 	var cdmHwfDelta = (_prevCdmHwfDrops !== null && cdmHwfDrops >= _prevCdmHwfDrops) ? (cdmHwfDrops - _prevCdmHwfDrops) : 0;
-	_prevPseDrops    = pseDrops;
-	_prevCdmHwfDrops = cdmHwfDrops;
+	// Re-establish the baseline after a failed probe; missing counters
+	// must not look like zero drops or a burst when sampling resumes.
+	_prevPseDrops    = available ? pseDrops : null;
+	_prevCdmHwfDrops = available ? cdmHwfDrops : null;
 
 	// DROPPING on CDM HW-forwarding drops or very high PSE bursts (>200/poll).
-	var activeDrop = cdmHwfDelta > 0 || pseDelta > 200;
+	var activeDrop = !!available && (cdmHwfDelta > 0 || pseDelta > 200);
 
 	// PPE offload efficiency — BND/(BND+UNB). Shown in subtitle for info only.
 	// LOW OFFLOAD state removed: low BND% when idle is expected, not a problem.
@@ -658,8 +663,9 @@ function hwBufferState(fe, ppe, mode) {
 	var ppeTotal = ppeBound + ppeUnb;
 	var ppePct   = ppeTotal > 0 ? Math.round(ppeBound / ppeTotal * 100) : 0;
 
-	var color = activeDrop ? '#f5a623' : '#00cc44';
+	var color = !available ? '#888' : activeDrop ? '#f5a623' : '#00cc44';
 	return {
+		available: !!available,
 		pseDrops: pseDrops, cdmHwfDrops: cdmHwfDrops, pseDelta: pseDelta, cdmHwfDelta: cdmHwfDelta,
 		activeDrop: activeDrop,
 		ppeBound: ppeBound, ppeTotal: ppeTotal, ppePct: ppePct,
@@ -1416,6 +1422,8 @@ function updateCompassCards(cs, bypass, jitter, wan, wifi, bridge, mode) {
 function getModeReasonText(reason) {
 	var reasonMap = {
 		dhcp_disabled: _('DHCP disabled in UCI'),
+		active_wan: _('Active WAN detected'),
+		no_active_wan: _('No active WAN'),
 		no_wan: _('No WAN IP detected'),
 		local_gateway: _('Local gateway detected')
 	};
@@ -1555,7 +1563,7 @@ function fsSummary(st, ppe, dm, bypass, jitter, wan, hwBuf, cs) {
 	var npuValue = cs.npuActive ? _('Hardware accelerated') : cs.hwEnabled ? _('NPU idle') : _('CPU path');
 	var npuColor = cs.npuActive ? '#0ea5e9' : cs.hwEnabled ? '#64748b' : '#f97316';
 	var errors = (wan.rx_errors || 0) + (wan.tx_errors || 0);
-	var health = hwBuf.activeDrop ? _('Buffer drops detected') : errors > 0 ? errors + ' ' + _('link errors') : _('No active drops');
+	var health = hwBuf.activeDrop ? _('Buffer drops detected') : errors > 0 ? errors + ' ' + _('link errors') : hwBuf.available ? _('No active drops') : _('NO DATA');
 	var freq = freqBarState(st.cpu_hw_freq, st.cpu_min_freq, st.cpu_max_freq,
 				 st.pll_freq_mhz, st.cpu_governor);
 	var freqMhz = freq.freq > 0 ? Math.round(freq.freq / 1000) : 0;
@@ -1606,7 +1614,7 @@ function fsWifiBandRow(band, wifi, ti, st, ppe) {
 	var retry = Number(ws.retry_pct) || 0;
 	var capacity = (Number(ws.avg_exp_throughput) || 0) * (100 - retry) / 100;
 	var maxScale = info.maxMbps || 1000;
-	var queue = getTxQueue(ti, band) || { type: st.npu_loaded ? 'npu' : 'dma' };
+	var queue = ti.available === false ? null : getTxQueue(ti, band);
 	var bnd = (ppe.bnd && ppe.bnd.band_bnd) ? (ppe.bnd.band_bnd[band] || 0) : 0;
 	var unb = (ppe.unb && ppe.unb.band_unb) ? (ppe.unb.band_unb[band] || 0) : 0;
 	var signal = Number(ws.avg_signal) || 0;
@@ -1615,7 +1623,7 @@ function fsWifiBandRow(band, wifi, ti, st, ppe) {
 	return E('div', { 'class': 'fs-band-row', 'style': fsStyle(accent, pct) }, [
 		E('div', { 'class': 'fs-band-identity' }, [
 			E('div', { 'class': 'fs-band-name' }, info.name),
-			E('span', { 'class': 'fs-route' }, String(queue.type || '?').toUpperCase())
+			E('span', { 'class': 'fs-route' }, queue ? String(queue.type || '?').toUpperCase() : _('NO DATA'))
 		]),
 		E('div', { 'class': 'fs-band-main' }, [
 			E('div', { 'class': 'fs-reading-line' }, [
@@ -1672,15 +1680,12 @@ function fsSampleEthRates(ports) {
 function fsEthOffload(port, ppe) {
 	var iface = port.iface || '';
 	if (iface === 'wan') {
-		var bndBands = (ppe.bnd && ppe.bnd.band_bnd) || [0, 0, 0];
-		var unbBands = (ppe.unb && ppe.unb.band_unb) || [0, 0, 0];
-		var wifiBnd = (bndBands[0] || 0) + (bndBands[1] || 0) + (bndBands[2] || 0);
-		var wifiUnb = (unbBands[0] || 0) + (unbBands[1] || 0) + (unbBands[2] || 0);
-		return { bnd: Math.max(0, ((ppe.bnd || {}).total || 0) - wifiBnd),
-			 unb: Math.max(0, ((ppe.unb || {}).total || 0) - wifiUnb) };
+		// PPE totals and Wi-Fi/LAN membership overlap; subtracting one
+		// from the other cannot identify flows traversing the WAN port.
+		return { available: false, bnd: 0, unb: 0 };
 	}
 	var idx = { lan1: 0, lan2: 1, lan3: 2, lan4: 3 }[iface];
-	return { bnd: (ppe.bnd && ppe.bnd.port_bnd && idx !== undefined) ? (ppe.bnd.port_bnd[idx] || 0) : 0, unb: 0 };
+	return { available: true, bnd: (ppe.bnd && ppe.bnd.port_bnd && idx !== undefined) ? (ppe.bnd.port_bnd[idx] || 0) : 0, unb: 0 };
 }
 
 function fsRate(label, value, linkSpeed, accent) {
@@ -1709,8 +1714,8 @@ function fsEthRow(port, rates, ppe) {
 			fsRate(_('RX'), rate.rx, speed, '#f97316')
 		]),
 		E('div', { 'class': 'fs-eth-offload' }, [
-			E('div', { 'class': 'fs-offload-count' }, offload.bnd.toString()),
-			E('div', { 'class': 'fs-offload-label' }, _('BND flows') + (offload.unb ? ' / ' + offload.unb + ' UNB' : ''))
+			E('div', { 'class': 'fs-offload-count' }, offload.available ? offload.bnd.toString() : 'N/A'),
+			E('div', { 'class': 'fs-offload-label' }, offload.available ? _('BND flows') : _('WAN flow attribution unavailable'))
 		])
 	]);
 }
