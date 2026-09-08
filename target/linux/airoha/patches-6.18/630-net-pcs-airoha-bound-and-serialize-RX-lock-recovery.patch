@@ -13,8 +13,9 @@ second apart, then hold a 30-second cooldown. Observe for one second again
 after expiry; partial receiver lock must not discard the cooldown. Require
 one second of signal loss before starting a new recovery epoch.
 
-Do not unconditionally enable pause in post_config after pcs_config has
-already applied permit_pause_to_mac.
+Leave pause configuration to pcs_config instead of unconditionally
+enabling it in post_config. This keeps the pause policy independent of
+callback ordering; the current phylink calls post_config first.
 
 Signed-off-by: OpenAI Codex <codex@openai.com>
 ---
