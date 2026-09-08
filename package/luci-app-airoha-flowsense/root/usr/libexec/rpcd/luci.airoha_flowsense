@@ -281,6 +281,15 @@ get_status() {
 		"${cpu_cur_freq:-0}" "${cpu_hw_freq:-0}" "${cpu_governor:-unknown}" "${cpu_avail_governors:-}" "${cpu_min_freq:-0}" "${cpu_max_freq:-0}" "${cpu_avail_freqs:-}" "${cpu_count:-0}" "${pll_freq:-0}"
 }
 
+get_port_fdb_macs() {
+	local device="$1"
+
+	[ -n "$device" ] || return
+	bridge fdb show dev "$device" 2>/dev/null |
+		grep -v " self\| permanent" | awk '{print $1}' |
+		tr '\n' '|' | sed 's/|$//'
+}
+
 get_ppe_entries() {
 	local bind_file="/tmp/luci-airoha-flowsense.ppe-bind.$$"
 	local entries_file="/tmp/luci-airoha-flowsense.ppe-entries.$$"
@@ -423,12 +432,22 @@ get_ppe_entries() {
 	fi
 	unb_json=$(printf '%s' "$unb_json" | sed 's/}$/,"band_unb":'"$band_unb"'}/')
 
-	# Per-port BND counts for LAN ports using bridge FDB learned MACs
+	# Keep PPE slots logical even where direct MAC ports retain ethX names.
+	local port1_dev=lan1 port2_dev=lan2 port3_dev=lan3 port4_dev=lan4
+	case "$(board_name 2>/dev/null)" in
+	gemtek,w1700k-ubi)
+		port1_dev=""; port2_dev=eth2; port3_dev=lan3; port4_dev=lan4
+		;;
+	gemtek,xr1710g-ubi)
+		port1_dev=eth2; port2_dev=lan2; port3_dev=lan3; port4_dev=""
+		;;
+	esac
+
 	local macs_p1 macs_p2 macs_p3 macs_p4
-	macs_p1=$(bridge fdb show dev lan1 2>/dev/null | grep -v " self\| permanent" | awk '{print $1}' | tr '\n' '|' | sed 's/|$//')
-	macs_p2=$(bridge fdb show dev lan2 2>/dev/null | grep -v " self\| permanent" | awk '{print $1}' | tr '\n' '|' | sed 's/|$//')
-	macs_p3=$(bridge fdb show dev lan3 2>/dev/null | grep -v " self\| permanent" | awk '{print $1}' | tr '\n' '|' | sed 's/|$//')
-	macs_p4=$(bridge fdb show dev lan4 2>/dev/null | grep -v " self\| permanent" | awk '{print $1}' | tr '\n' '|' | sed 's/|$//')
+	macs_p1=$(get_port_fdb_macs "$port1_dev")
+	macs_p2=$(get_port_fdb_macs "$port2_dev")
+	macs_p3=$(get_port_fdb_macs "$port3_dev")
+	macs_p4=$(get_port_fdb_macs "$port4_dev")
 
 	local port_bnd="[0,0,0,0]"
 	if [ -f "$bind_file" ]; then
@@ -1130,9 +1149,16 @@ get_conflict_alerts() {
 
 get_eth_stats() {
 	printf '{"ports":['
-	local first=1
-	for iface in wan lan1 lan2 lan3 lan4; do
-		local sys="/sys/class/net/$iface"
+	local first=1 interfaces entry device iface
+	case "$(board_name 2>/dev/null)" in
+	gemtek,w1700k-ubi) interfaces="eth1:wan eth2:lan2 lan3:lan3 lan4:lan4" ;;
+	gemtek,xr1710g-ubi) interfaces="eth1:wan eth2:lan1 lan2:lan2 lan3:lan3" ;;
+	*) interfaces="wan:wan lan1:lan1 lan2:lan2 lan3:lan3 lan4:lan4" ;;
+	esac
+	for entry in $interfaces; do
+		device=${entry%%:*}
+		iface=${entry#*:}
+		local sys="/sys/class/net/$device"
 		[ -d "$sys" ] || continue
 		local operstate up=false
 		operstate=$(cat "$sys/operstate" 2>/dev/null || echo "unknown")
@@ -1146,8 +1172,8 @@ get_eth_stats() {
 		tx_errors=$(cat "$sys/statistics/tx_errors" 2>/dev/null || echo 0)
 		rx_errors=$(cat "$sys/statistics/rx_errors" 2>/dev/null || echo 0)
 		[ "$first" = "1" ] || printf ","
-		printf '{"iface":"%s","up":%s,"speed":%d,"tx_bytes":%d,"rx_bytes":%d,"tx_errors":%d,"rx_errors":%d}' \
-			"$iface" "$up" "$speed" "$tx_bytes" "$rx_bytes" "$tx_errors" "$rx_errors"
+		printf '{"iface":"%s","device":"%s","up":%s,"speed":%d,"tx_bytes":%d,"rx_bytes":%d,"tx_errors":%d,"rx_errors":%d}' \
+			"$iface" "$device" "$up" "$speed" "$tx_bytes" "$rx_bytes" "$tx_errors" "$rx_errors"
 		first=0
 	done
 	printf ']}'
@@ -1156,20 +1182,34 @@ get_eth_stats() {
 get_ping_target() {
 	local target
 	target=$(uci get npu-monitor.@jitter[0].target 2>/dev/null || echo "223.5.5.5")
+	_valid_ping_target "$target" || target="223.5.5.5"
 	printf '{"target":"%s"}' "$target"
+}
+
+_valid_ping_target() {
+	# The daemon embeds this value in JSON and passes it to ping.
+	case "$1" in
+		''|-*|*[!A-Za-z0-9.:_-]*) return 1 ;;
+	esac
+	[ "${#1}" -le 253 ]
 }
 
 set_ping_target() {
 	local input target
 	input=$(cat 2>/dev/null)
 	target=$(echo "$input" | jsonfilter -e '@.target' 2>/dev/null)
-	if [ -z "$target" ]; then
-		echo '{"error":"Missing target parameter"}'
+	if ! _valid_ping_target "$target"; then
+		echo '{"error":"Invalid ping target: use an IP address or hostname up to 253 characters"}'
 		return
 	fi
-	uci set npu-monitor.@jitter[0].target="$target"
-	uci commit npu-monitor
-	/etc/init.d/npu-jitter restart 2>/dev/null
+	if ! uci set npu-monitor.@jitter[0].target="$target" || ! uci commit npu-monitor; then
+		echo '{"error":"Failed to save ping target"}'
+		return
+	fi
+	if ! /etc/init.d/npu-jitter restart >/dev/null 2>&1; then
+		echo '{"error":"Ping target saved, but monitor restart failed"}'
+		return
+	fi
 	printf '{"success":true,"target":"%s"}' "$target"
 }
 
